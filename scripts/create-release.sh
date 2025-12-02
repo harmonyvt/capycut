@@ -8,6 +8,19 @@ VERSION="${1:-0.0.5}"
 
 echo "Creating release for version ${VERSION}..."
 echo ""
+
+# Check current branch
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [[ "$CURRENT_BRANCH" != "master" && "$CURRENT_BRANCH" != "main" ]]; then
+    echo "Warning: You are on branch '$CURRENT_BRANCH'"
+    echo "Releases should typically be created from 'main' or 'master' branch."
+    read -p "Continue anyway? (y/N): " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo "Cancelled."
+        exit 1
+    fi
+fi
+
 echo "Current version tags:"
 git tag -l "v*" | tail -5 || echo "  (none)"
 echo ""

@@ -104,6 +104,11 @@ release-version:
 		echo "Error: VERSION not specified. Usage: make release-version VERSION=0.0.5"; \
 		exit 1; \
 	fi
+	@if ! echo "$(VERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$$'; then \
+		echo "Error: VERSION must be in semantic versioning format (x.y.z)"; \
+		echo "Example: make release-version VERSION=0.0.5"; \
+		exit 1; \
+	fi
 	@echo "Current version tags:"
 	@git tag -l "v*" | tail -5 || echo "  (none)"
 	@echo ""
