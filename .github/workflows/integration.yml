@@ -233,7 +233,11 @@ jobs:
   # End-to-end test with Azure OpenAI
   e2e-with-azure:
     needs: setup
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     # Only run if Azure secrets are available (not on forks)
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     steps:
@@ -245,18 +249,33 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Install FFmpeg
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      - name: Build capycut
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y
+
+      - name: Build capycut (Unix)
+        if: runner.os != 'Windows'
         run: go build -o capycut .
+
+      - name: Build capycut (Windows)
+        if: runner.os == 'Windows'
+        run: go build -o capycut.exe .
 
       - name: Download test video
         uses: actions/download-artifact@v4
         with:
           name: test-video
 
-      - name: Run end-to-end test with Azure OpenAI
+      - name: Run end-to-end test with Azure OpenAI (Unix)
+        if: runner.os != 'Windows'
         env:
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
@@ -274,7 +293,7 @@ jobs:
             exit 0
           fi
           
-          echo "Running E2E test with Azure OpenAI..."
+          echo "Running E2E test with Azure OpenAI on ${{ runner.os }}..."
           
           # Run capycut with Azure OpenAI (non-interactive mode with --file and --prompt)
           ./capycut --file ${{ env.TEST_VIDEO_NAME }} --prompt "first 5 seconds" --output e2e_clip.mp4 || {
@@ -299,7 +318,55 @@ jobs:
             exit 1
           fi
 
-      - name: Run integration tests with Azure
+      - name: Run end-to-end test with Azure OpenAI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_MODEL: ${{ secrets.AZURE_OPENAI_MODEL }}
+          AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
+        run: |
+          # Verify Azure credentials are set (all required vars)
+          if (-not $env:AZURE_OPENAI_ENDPOINT -or -not $env:AZURE_OPENAI_API_KEY -or -not $env:AZURE_OPENAI_MODEL) {
+            Write-Host "Azure OpenAI credentials not configured. Skipping E2E test."
+            Write-Host "To enable this test, add the following secrets to your repository:"
+            Write-Host "  - AZURE_OPENAI_ENDPOINT"
+            Write-Host "  - AZURE_OPENAI_API_KEY"
+            Write-Host "  - AZURE_OPENAI_MODEL"
+            Write-Host "  - AZURE_OPENAI_API_VERSION (optional, defaults to 2025-04-01-preview)"
+            exit 0
+          }
+          
+          Write-Host "Running E2E test with Azure OpenAI on ${{ runner.os }}..."
+          
+          # Run capycut with Azure OpenAI (non-interactive mode with --file and --prompt)
+          .\capycut.exe --file ${{ env.TEST_VIDEO_NAME }} --prompt "first 5 seconds" --output e2e_clip.mp4
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "E2E test failed"
+            exit 1
+          }
+          
+          # Verify output was created
+          if (Test-Path e2e_clip.mp4) {
+            Write-Host "E2E test passed - clip created successfully"
+            $duration = ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 e2e_clip.mp4
+            Write-Host "Output clip duration: $duration seconds"
+            
+            # Verify duration is approximately 5 seconds (with 1 second tolerance)
+            $durationNum = [double]$duration
+            if ($durationNum -gt 4 -and $durationNum -lt 6) {
+              Write-Host "Duration verification passed!"
+            } else {
+              Write-Host "Warning: Duration $duration is outside expected range (4-6 seconds)"
+            }
+          } else {
+            Write-Error "E2E test failed - clip was not created"
+            exit 1
+          }
+
+      - name: Run integration tests with Azure (Unix)
+        if: runner.os != 'Windows'
         env:
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
@@ -311,6 +378,23 @@ jobs:
             echo "Skipping Azure integration tests - credentials not configured"
             exit 0
           fi
+          
+          go test -v -tags=integration -run "TestIntegration_EnvironmentDetection" ./...
+
+      - name: Run integration tests with Azure (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_MODEL: ${{ secrets.AZURE_OPENAI_MODEL }}
+          AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
+          TEST_VIDEO_PATH: ${{ env.TEST_VIDEO_NAME }}
+        run: |
+          if (-not $env:AZURE_OPENAI_ENDPOINT -or -not $env:AZURE_OPENAI_API_KEY) {
+            Write-Host "Skipping Azure integration tests - credentials not configured"
+            exit 0
+          }
           
           go test -v -tags=integration -run "TestIntegration_EnvironmentDetection" ./...
 
