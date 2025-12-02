@@ -256,8 +256,9 @@ jobs:
 
       - name: Start mock LLM server
         run: |
-          # Create a simple mock LLM server that returns valid clip timestamps
-          cat > mock_llm_server.go << 'EOF'
+          # Create a simple mock LLM server in a separate directory to avoid conflicts
+          mkdir -p /tmp/mockserver
+          cat > /tmp/mockserver/main.go << 'EOF'
           package main
 
           import (
@@ -328,7 +329,7 @@ jobs:
           }
           EOF
           
-          go run mock_llm_server.go &
+          cd /tmp/mockserver && go run main.go &
           sleep 2
           echo "Mock LLM server started"
 
