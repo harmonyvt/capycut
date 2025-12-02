@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/creativeprojects/go-selfupdate"
 	"github.com/joho/godotenv"
 )
 
@@ -68,6 +69,7 @@ var (
 	debugFlag        bool
 	helpFlag         bool
 	setupFlag        bool
+	updateFlag       bool
 	providerFlag     string
 	fileFlag         string
 	promptFlag       string
@@ -81,6 +83,7 @@ func init() {
 	flag.BoolVar(&helpFlag, "help", false, "Show help message")
 	flag.BoolVar(&helpFlag, "h", false, "Show help message (short)")
 	flag.BoolVar(&setupFlag, "setup", false, "Run interactive setup wizard")
+	flag.BoolVar(&updateFlag, "update", false, "Update capycut to the latest version")
 	flag.StringVar(&providerFlag, "provider", "", "LLM provider: 'local' or 'azure'")
 	flag.StringVar(&fileFlag, "file", "", "Path to video file")
 	flag.StringVar(&fileFlag, "f", "", "Path to video file (short)")
@@ -111,6 +114,7 @@ OPTIONS:
     --provider <name>       LLM provider: 'local' or 'azure' (overrides LLM_PROVIDER env var)
     
     --setup                 Run interactive setup wizard to configure CapyCut
+    --update                Update capycut to the latest version
     --debug                 Enable debug output
     -v, --version           Print version information
     -h, --help              Show this help message
@@ -423,6 +427,70 @@ func generateDotEnv(provider, endpoint, apiKey, model, apiVersion string) string
 	return strings.Join(lines, "\n")
 }
 
+// GitHub repository for updates
+const (
+	repoOwner = "harmonyvt"
+	repoName  = "capycut"
+)
+
+func runSelfUpdate() error {
+	fmt.Println(infoStyle.Render("Checking for updates..."))
+
+	// Skip update check for dev version
+	if version == "dev" {
+		fmt.Println(infoStyle.Render("Running development version, skipping update check."))
+		return nil
+	}
+
+	source, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{})
+	if err != nil {
+		return fmt.Errorf("failed to create update source: %w", err)
+	}
+
+	updater, err := selfupdate.NewUpdater(selfupdate.Config{
+		Source:    source,
+		Validator: nil, // No signature validation for now
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create updater: %w", err)
+	}
+
+	latest, found, err := updater.DetectLatest(context.Background(), selfupdate.NewRepositorySlug(repoOwner, repoName))
+	if err != nil {
+		return fmt.Errorf("failed to detect latest version: %w", err)
+	}
+	if !found {
+		fmt.Println(infoStyle.Render("No release found."))
+		return nil
+	}
+
+	currentVersion := version
+	if strings.HasPrefix(currentVersion, "v") {
+		currentVersion = currentVersion[1:]
+	}
+
+	if !latest.GreaterThan(currentVersion) {
+		fmt.Println(successStyle.Render(fmt.Sprintf("Already up to date! (version %s)", version)))
+		return nil
+	}
+
+	fmt.Println(subtitleStyle.Render(fmt.Sprintf("New version available: %s (current: %s)", latest.Version(), version)))
+	fmt.Println(infoStyle.Render("Downloading update..."))
+
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+
+	if err := updater.UpdateTo(context.Background(), latest, exe); err != nil {
+		return fmt.Errorf("failed to update: %w", err)
+	}
+
+	fmt.Println(successStyle.Render(fmt.Sprintf("Successfully updated to version %s!", latest.Version())))
+	fmt.Println(infoStyle.Render("Please restart capycut to use the new version."))
+	return nil
+}
+
 func runSetupWizard() {
 	fmt.Println(titleStyle.Render(capybaraLogo))
 	fmt.Println(subtitleStyle.Render("Welcome to CapyCut Setup! Let's configure your LLM provider.\n"))
@@ -717,6 +785,15 @@ func main() {
 	// Run setup wizard if requested
 	if setupFlag {
 		runSetupWizard()
+		os.Exit(0)
+	}
+
+	// Run self-update if requested
+	if updateFlag {
+		if err := runSelfUpdate(); err != nil {
+			fmt.Println(errorStyle.Render("Update failed: " + err.Error()))
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 

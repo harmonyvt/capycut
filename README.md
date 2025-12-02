@@ -4,25 +4,31 @@ AI-powered video clipper CLI. Describe what you want to clip in natural language
 
 ## Installation
 
-### macOS
+### Quick Install (Recommended)
 
+**macOS / Linux:**
 ```bash
-# Install FFmpeg (required)
-brew install ffmpeg
-
-# Download and install CapyCut (Apple Silicon)
-curl -L https://github.com/harmonyvt/capycut/releases/latest/download/capycut_darwin_arm64.tar.gz | tar xz
-sudo mv capycut /usr/local/bin/
-
-# For Intel Macs, use:
-# curl -L https://github.com/harmonyvt/capycut/releases/latest/download/capycut_darwin_amd64.tar.gz | tar xz
-# sudo mv capycut /usr/local/bin/
+curl -fsSL https://raw.githubusercontent.com/harmonyvt/capycut/main/install.sh | sh
 ```
 
-### Linux
+Or with wget:
+```bash
+wget -qO- https://raw.githubusercontent.com/harmonyvt/capycut/main/install.sh | sh
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/harmonyvt/capycut/main/install.ps1 | iex
+```
+
+### Prerequisites
+
+**FFmpeg is required.** Install it for your platform:
 
 ```bash
-# Install FFmpeg (required)
+# macOS
+brew install ffmpeg
+
 # Ubuntu/Debian
 sudo apt install ffmpeg
 
@@ -32,40 +38,65 @@ sudo dnf install ffmpeg
 # Arch
 sudo pacman -S ffmpeg
 
-# Download and install CapyCut
+# Windows (winget)
+winget install ffmpeg
+
+# Windows (Chocolatey)
+choco install ffmpeg
+```
+
+### Updating
+
+CapyCut can update itself! Simply run:
+
+```bash
+capycut --update
+```
+
+### Manual Installation
+
+<details>
+<summary>macOS</summary>
+
+```bash
+# Apple Silicon (M1/M2/M3)
+curl -L https://github.com/harmonyvt/capycut/releases/latest/download/capycut_darwin_arm64.tar.gz | tar xz
+sudo mv capycut /usr/local/bin/
+
+# Intel Macs
+curl -L https://github.com/harmonyvt/capycut/releases/latest/download/capycut_darwin_amd64.tar.gz | tar xz
+sudo mv capycut /usr/local/bin/
+```
+</details>
+
+<details>
+<summary>Linux</summary>
+
+```bash
+# x86_64 / amd64
 curl -L https://github.com/harmonyvt/capycut/releases/latest/download/capycut_linux_amd64.tar.gz | tar xz
 sudo mv capycut /usr/local/bin/
 
-# For ARM64 (e.g., Raspberry Pi), use:
-# curl -L https://github.com/harmonyvt/capycut/releases/latest/download/capycut_linux_arm64.tar.gz | tar xz
-# sudo mv capycut /usr/local/bin/
+# ARM64 (e.g., Raspberry Pi)
+curl -L https://github.com/harmonyvt/capycut/releases/latest/download/capycut_linux_arm64.tar.gz | tar xz
+sudo mv capycut /usr/local/bin/
 ```
+</details>
 
-### Windows
+<details>
+<summary>Windows</summary>
 
-1. **Install FFmpeg** (required):
-   ```powershell
-   # Using winget
-   winget install ffmpeg
+1. Download `capycut_windows_amd64.zip` from [GitHub Releases](https://github.com/harmonyvt/capycut/releases/latest)
+2. Extract the zip file
+3. Move `capycut.exe` to a directory in your PATH
 
-   # Or using Chocolatey
-   choco install ffmpeg
-   ```
-
-2. **Download CapyCut**:
-   - Download `capycut_windows_amd64.zip` from [GitHub Releases](https://github.com/harmonyvt/capycut/releases/latest)
-   - Extract the zip file
-   - Move `capycut.exe` to a directory in your PATH (e.g., `C:\Windows\System32` or create a custom directory)
-
-   Or via PowerShell:
-   ```powershell
-   # Download and extract
-   Invoke-WebRequest -Uri "https://github.com/harmonyvt/capycut/releases/latest/download/capycut_windows_amd64.zip" -OutFile "capycut.zip"
-   Expand-Archive -Path "capycut.zip" -DestinationPath "."
-
-   # Move to a directory in your PATH
-   Move-Item -Path "capycut.exe" -Destination "C:\Windows\System32\"
-   ```
+Or via PowerShell:
+```powershell
+Invoke-WebRequest -Uri "https://github.com/harmonyvt/capycut/releases/latest/download/capycut_windows_amd64.zip" -OutFile "capycut.zip"
+Expand-Archive -Path "capycut.zip" -DestinationPath "."
+Move-Item -Path "capycut.exe" -Destination "$env:LOCALAPPDATA\Programs\capycut\"
+```
+</details>
 
 ### Build from Source
 
