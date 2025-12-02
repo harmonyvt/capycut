@@ -61,13 +61,11 @@ export AZURE_OPENAI_API_VERSION="2024-08-01-preview"  # optional
 
 ### Option 2: .env File
 
-Create a `.env` file in your working directory:
+Copy the example and fill in your values:
 
-```env
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
-AZURE_OPENAI_API_KEY=your-api-key
-AZURE_OPENAI_MODEL=gpt-4o
-AZURE_OPENAI_API_VERSION=2024-08-01-preview
+```bash
+cp .env.example .env
+# Edit .env with your credentials
 ```
 
 ## Usage
@@ -91,6 +89,24 @@ Then:
 
 ```bash
 capycut --version
+```
+
+## Development
+
+```bash
+# Clone the repo
+git clone https://github.com/harmonyvt/capycut.git
+cd capycut
+
+# Copy and configure environment
+cp .env.example .env
+# Edit .env with your Azure OpenAI credentials
+
+# Run commands
+make help          # Show all commands
+make run           # Build and run
+make test          # Run tests
+make release-dry   # Test release build locally
 ```
 
 ## License
