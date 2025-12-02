@@ -1,0 +1,34 @@
+#!/bin/bash
+set -e
+
+# Script to create a release for CapyCut
+# This should be run from the main/default branch
+
+VERSION="${1:-0.0.5}"
+
+echo "Creating release for version ${VERSION}..."
+echo ""
+echo "Current version tags:"
+git tag -l "v*" | tail -5 || echo "  (none)"
+echo ""
+
+# Validate we're on a clean branch
+if [ -n "$(git status --porcelain)" ]; then
+    echo "Error: Working directory is not clean. Please commit or stash your changes."
+    exit 1
+fi
+
+# Create the tag
+echo "Creating tag v${VERSION}..."
+git tag -a "v${VERSION}" -m "Release v${VERSION}"
+
+# Push the tag
+echo "Pushing tag v${VERSION} to origin..."
+git push origin "v${VERSION}"
+
+echo ""
+echo "Release v${VERSION} triggered! Check:"
+echo "  https://github.com/harmonyvt/capycut/actions"
+echo ""
+echo "Once the GitHub Actions workflow completes, the release will be available at:"
+echo "  https://github.com/harmonyvt/capycut/releases/tag/v${VERSION}"
