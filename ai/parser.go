@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -85,19 +86,31 @@ func NewParser() (*Parser, error) {
 		apiVersion = "2025-04-01-preview"
 	}
 
-	// Ensure endpoint doesn't have trailing slash
+	// Parse and normalize endpoint - extract just the base URL
 	endpoint = strings.TrimSuffix(endpoint, "/")
+	parsedURL, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("invalid AZURE_OPENAI_ENDPOINT URL: %w", err)
+	}
+	// Use only scheme + host (strip any path or query params)
+	baseURL := fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
+
+	// Build the full API URL
+	fullURL := fmt.Sprintf("%s/openai/responses?api-version=%s", baseURL, apiVersion)
 
 	// Debug output
 	if debug {
 		fmt.Println("\n[DEBUG] Azure OpenAI Configuration:")
-		fmt.Printf("  AZURE_OPENAI_ENDPOINT:    %s\n", endpoint)
-		fmt.Printf("  AZURE_OPENAI_API_KEY:     %s...%s\n", apiKey[:4], apiKey[len(apiKey)-4:])
-		fmt.Printf("  AZURE_OPENAI_MODEL:       %s\n", model)
-		fmt.Printf("  AZURE_OPENAI_API_VERSION: %s\n", apiVersion)
-		fmt.Printf("  Constructed URL:          %s/openai/responses?api-version=%s\n", endpoint, apiVersion)
+		fmt.Printf("  AZURE_OPENAI_ENDPOINT (raw): %s\n", os.Getenv("AZURE_OPENAI_ENDPOINT"))
+		fmt.Printf("  AZURE_OPENAI_ENDPOINT (base): %s\n", baseURL)
+		fmt.Printf("  AZURE_OPENAI_API_KEY:        %s...%s\n", apiKey[:4], apiKey[len(apiKey)-4:])
+		fmt.Printf("  AZURE_OPENAI_MODEL:          %s\n", model)
+		fmt.Printf("  AZURE_OPENAI_API_VERSION:    %s\n", apiVersion)
+		fmt.Printf("  Constructed URL:             %s\n", fullURL)
 		fmt.Println()
 	}
+
+	endpoint = baseURL
 
 	return &Parser{
 		endpoint:   endpoint,
