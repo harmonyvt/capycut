@@ -23,7 +23,17 @@ This will:
 4. Push the tag to GitHub
 5. Trigger the GitHub Actions workflow to build and publish the release
 
-## Method 2: Using Make with Manual Steps
+## Method 2: Using Make (Non-Interactive)
+
+For automation or CI/CD, use the `release-version` target:
+
+```bash
+make release-version VERSION=0.0.5
+```
+
+This does the same as the interactive version but without prompting for input.
+
+## Method 3: Using Make with Manual Steps
 
 If the interactive `make release` doesn't work in your environment, you can manually create and push the tag:
 
@@ -38,7 +48,7 @@ git tag -a "v0.0.5" -m "Release v0.0.5"
 git push origin "v0.0.5"
 ```
 
-## Method 3: Using the Helper Script
+## Method 4: Using the Helper Script
 
 A helper script is provided in `scripts/create-release.sh`:
 
@@ -75,13 +85,18 @@ To resolve this:
 
 To create release v0.0.5 specifically, run from the main branch:
 
+**Interactive:**
 ```bash
 make release
 # When prompted, enter: 0.0.5
 ```
 
-Or directly:
+**Non-interactive:**
+```bash
+make release-version VERSION=0.0.5
+```
 
+**Manual:**
 ```bash
 git tag -a "v0.0.5" -m "Release v0.0.5"
 git push origin "v0.0.5"
