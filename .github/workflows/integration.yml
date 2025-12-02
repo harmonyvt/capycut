@@ -230,10 +230,12 @@ jobs:
           Write-Host "PSModulePath: $psModulePath"
           Write-Host "Running in: ${{ matrix.shell }}"
 
-  # End-to-end test with mock LLM server
-  e2e-with-mock-llm:
+  # End-to-end test with Azure OpenAI
+  e2e-with-azure:
     needs: setup
     runs-on: ubuntu-latest
+    # Only run if Azure secrets are available (not on forks)
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -254,116 +256,70 @@ jobs:
         with:
           name: test-video
 
-      - name: Start mock LLM server
-        run: |
-          # Create a simple mock LLM server in a separate directory to avoid conflicts
-          mkdir -p /tmp/mockserver
-          cat > /tmp/mockserver/main.go << 'EOF'
-          package main
-
-          import (
-            "encoding/json"
-            "fmt"
-            "net/http"
-            "io"
-          )
-
-          type ChatRequest struct {
-            Model    string `json:"model"`
-            Messages []struct {
-              Role    string `json:"role"`
-              Content string `json:"content"`
-            } `json:"messages"`
-          }
-
-          type ChatResponse struct {
-            ID      string `json:"id"`
-            Object  string `json:"object"`
-            Choices []struct {
-              Index   int `json:"index"`
-              Message struct {
-                Role    string `json:"role"`
-                Content string `json:"content"`
-              } `json:"message"`
-              FinishReason string `json:"finish_reason"`
-            } `json:"choices"`
-          }
-
-          func main() {
-            http.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-              body, _ := io.ReadAll(r.Body)
-              fmt.Printf("Received request: %s\n", string(body))
-              
-              // Return a valid clip response (first 5 seconds)
-              response := ChatResponse{
-                ID:     "mock-123",
-                Object: "chat.completion",
-                Choices: []struct {
-                  Index   int `json:"index"`
-                  Message struct {
-                    Role    string `json:"role"`
-                    Content string `json:"content"`
-                  } `json:"message"`
-                  FinishReason string `json:"finish_reason"`
-                }{
-                  {
-                    Index: 0,
-                    Message: struct {
-                      Role    string `json:"role"`
-                      Content string `json:"content"`
-                    }{
-                      Role:    "assistant",
-                      Content: `{"start_time": "00:00:00", "end_time": "00:00:05"}`,
-                    },
-                    FinishReason: "stop",
-                  },
-                },
-              }
-              
-              w.Header().Set("Content-Type", "application/json")
-              json.NewEncoder(w).Encode(response)
-            })
-            
-            fmt.Println("Mock LLM server starting on :11434")
-            http.ListenAndServe(":11434", nil)
-          }
-          EOF
-          
-          cd /tmp/mockserver && go run main.go &
-          sleep 2
-          echo "Mock LLM server started"
-
-      - name: Test mock LLM server
-        run: |
-          curl -X POST http://localhost:11434/v1/chat/completions \
-            -H "Content-Type: application/json" \
-            -d '{"model":"test","messages":[{"role":"user","content":"test"}]}'
-
-      - name: Run end-to-end test with mock LLM
+      - name: Run end-to-end test with Azure OpenAI
         env:
-          LLM_PROVIDER: "local"
-          LLM_ENDPOINT: "http://localhost:11434"
-          LLM_MODEL: "mock-model"
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_MODEL: ${{ secrets.AZURE_OPENAI_MODEL }}
+          AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
         run: |
-          # Run capycut with the mock LLM
+          # Verify Azure credentials are set (all required vars)
+          if [ -z "$AZURE_OPENAI_ENDPOINT" ] || [ -z "$AZURE_OPENAI_API_KEY" ] || [ -z "$AZURE_OPENAI_MODEL" ]; then
+            echo "Azure OpenAI credentials not configured. Skipping E2E test."
+            echo "To enable this test, add the following secrets to your repository:"
+            echo "  - AZURE_OPENAI_ENDPOINT"
+            echo "  - AZURE_OPENAI_API_KEY"
+            echo "  - AZURE_OPENAI_MODEL"
+            echo "  - AZURE_OPENAI_API_VERSION (optional, defaults to 2025-04-01-preview)"
+            exit 0
+          fi
+          
+          echo "Running E2E test with Azure OpenAI..."
+          
+          # Run capycut with Azure OpenAI (non-interactive mode with --file and --prompt)
           ./capycut --file ${{ env.TEST_VIDEO_NAME }} --prompt "first 5 seconds" --output e2e_clip.mp4 || {
-            echo "Note: Interactive mode may have failed, but we tested the flow"
+            echo "E2E test failed"
+            exit 1
           }
           
-          # Check if output was created (may fail if interactive prompts block)
+          # Verify output was created
           if [ -f e2e_clip.mp4 ]; then
             echo "E2E test passed - clip created successfully"
-            ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 e2e_clip.mp4
+            DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 e2e_clip.mp4)
+            echo "Output clip duration: $DURATION seconds"
+            
+            # Verify duration is approximately 5 seconds (with 1 second tolerance)
+            if [ $(echo "$DURATION > 4" | bc -l) -eq 1 ] && [ $(echo "$DURATION < 6" | bc -l) -eq 1 ]; then
+              echo "Duration verification passed!"
+            else
+              echo "Warning: Duration $DURATION is outside expected range (4-6 seconds)"
+            fi
           else
-            echo "E2E clip not created (expected if confirmation prompt blocked)"
+            echo "E2E test failed - clip was not created"
+            exit 1
           fi
+
+      - name: Run integration tests with Azure
+        env:
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_MODEL: ${{ secrets.AZURE_OPENAI_MODEL }}
+          AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
+          TEST_VIDEO_PATH: ${{ env.TEST_VIDEO_NAME }}
+        run: |
+          if [ -z "$AZURE_OPENAI_ENDPOINT" ] || [ -z "$AZURE_OPENAI_API_KEY" ]; then
+            echo "Skipping Azure integration tests - credentials not configured"
+            exit 0
+          fi
+          
+          go test -v -tags=integration -run "TestIntegration_EnvironmentDetection" ./...
 
       - name: Run unit tests
         run: go test -v ./...
 
   # Summary job
   integration-summary:
-    needs: [integration-linux, integration-macos, integration-windows, e2e-with-mock-llm]
+    needs: [integration-linux, integration-macos, integration-windows, e2e-with-azure]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -374,12 +330,18 @@ jobs:
           echo "Linux tests: ${{ needs.integration-linux.result }}"
           echo "macOS tests: ${{ needs.integration-macos.result }}"
           echo "Windows tests: ${{ needs.integration-windows.result }}"
-          echo "E2E tests: ${{ needs.e2e-with-mock-llm.result }}"
+          echo "E2E with Azure: ${{ needs.e2e-with-azure.result }}"
           
           if [ "${{ needs.integration-linux.result }}" = "failure" ] || \
              [ "${{ needs.integration-macos.result }}" = "failure" ] || \
              [ "${{ needs.integration-windows.result }}" = "failure" ]; then
             echo "Some integration tests failed!"
+            exit 1
+          fi
+          
+          # E2E with Azure is allowed to be skipped (for forks without secrets)
+          if [ "${{ needs.e2e-with-azure.result }}" = "failure" ]; then
+            echo "E2E test with Azure failed!"
             exit 1
           fi
           
