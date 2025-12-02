@@ -64,6 +64,7 @@ func main() {
 	// Parse flags
 	versionFlag := flag.Bool("version", false, "Print version information")
 	shortVersionFlag := flag.Bool("v", false, "Print version information (short)")
+	debugFlag := flag.Bool("debug", false, "Enable debug output")
 	flag.Parse()
 
 	if *versionFlag || *shortVersionFlag {
@@ -73,6 +74,11 @@ func main() {
 		fmt.Printf("  go:     %s\n", runtime.Version())
 		fmt.Printf("  os/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 		os.Exit(0)
+	}
+
+	// Enable debug mode via flag
+	if *debugFlag {
+		os.Setenv("CAPYCUT_DEBUG", "1")
 	}
 
 	// Load .env file if it exists (won't error if missing)

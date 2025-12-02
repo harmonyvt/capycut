@@ -68,6 +68,7 @@ func NewParser() (*Parser, error) {
 	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
 	model := os.Getenv("AZURE_OPENAI_MODEL")
 	apiVersion := os.Getenv("AZURE_OPENAI_API_VERSION")
+	debug := os.Getenv("CAPYCUT_DEBUG") != ""
 
 	if endpoint == "" {
 		return nil, fmt.Errorf("AZURE_OPENAI_ENDPOINT environment variable not set")
@@ -86,6 +87,17 @@ func NewParser() (*Parser, error) {
 
 	// Ensure endpoint doesn't have trailing slash
 	endpoint = strings.TrimSuffix(endpoint, "/")
+
+	// Debug output
+	if debug {
+		fmt.Println("\n[DEBUG] Azure OpenAI Configuration:")
+		fmt.Printf("  AZURE_OPENAI_ENDPOINT:    %s\n", endpoint)
+		fmt.Printf("  AZURE_OPENAI_API_KEY:     %s...%s\n", apiKey[:4], apiKey[len(apiKey)-4:])
+		fmt.Printf("  AZURE_OPENAI_MODEL:       %s\n", model)
+		fmt.Printf("  AZURE_OPENAI_API_VERSION: %s\n", apiVersion)
+		fmt.Printf("  Constructed URL:          %s/openai/responses?api-version=%s\n", endpoint, apiVersion)
+		fmt.Println()
+	}
 
 	return &Parser{
 		endpoint:   endpoint,
@@ -156,7 +168,15 @@ Or if there's an error:
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("AI request failed: %s %s", resp.Status, string(body))
+		debug := os.Getenv("CAPYCUT_DEBUG") != ""
+		if debug {
+			fmt.Printf("\n[DEBUG] Request failed:\n")
+			fmt.Printf("  URL:         %s\n", url)
+			fmt.Printf("  Status:      %s\n", resp.Status)
+			fmt.Printf("  Response:    %s\n", string(body))
+			fmt.Println()
+		}
+		return nil, fmt.Errorf("AI request failed: %s\n  URL: %s\n  Response: %s", resp.Status, url, string(body))
 	}
 
 	var apiResp responsesResponse
