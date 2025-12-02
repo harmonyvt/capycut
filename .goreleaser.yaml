@@ -26,26 +26,22 @@ builds:
 archives:
   - formats:
       - tar.gz
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- .Version }}_
-      {{- .Os }}_
-      {{- .Arch }}
-  - id: windows
-    formats:
       - zip
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+      - goos: linux
+        formats:
+          - tar.gz
+      - goos: darwin
+        formats:
+          - tar.gz
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
       {{- .Os }}_
       {{- .Arch }}
-    builds:
-      - default
-    overrides:
-      - goos: linux
-        skip: true
-      - goos: darwin
-        skip: true
 
 checksum:
   name_template: 'checksums.txt'

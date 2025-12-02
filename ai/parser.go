@@ -34,7 +34,6 @@ type responsesRequest struct {
 	Model           string    `json:"model"`
 	Input           []message `json:"input"`
 	MaxOutputTokens int       `json:"max_output_tokens,omitempty"`
-	Temperature     float64   `json:"temperature,omitempty"`
 }
 
 type message struct {
@@ -43,14 +42,21 @@ type message struct {
 }
 
 type responsesResponse struct {
-	ID     string       `json:"id"`
-	Output []outputItem `json:"output"`
-	Error  *apiError    `json:"error,omitempty"`
+	ID                string             `json:"id"`
+	Status            string             `json:"status"`
+	Output            []outputItem       `json:"output"`
+	Error             *apiError          `json:"error,omitempty"`
+	IncompleteDetails *incompleteDetails `json:"incomplete_details,omitempty"`
+}
+
+type incompleteDetails struct {
+	Reason string `json:"reason"`
 }
 
 type outputItem struct {
 	Type    string        `json:"type"`
 	Content []contentItem `json:"content,omitempty"`
+	Text    string        `json:"text,omitempty"` // Some responses have text directly
 }
 
 type contentItem struct {
@@ -149,8 +155,7 @@ Or if there's an error:
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userInput},
 		},
-		MaxOutputTokens: 256,
-		Temperature:     0.1,
+		MaxOutputTokens: 2048,
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
@@ -192,6 +197,11 @@ Or if there's an error:
 		return nil, fmt.Errorf("AI request failed: %s\n  URL: %s\n  Response: %s", resp.Status, url, string(body))
 	}
 
+	debug := os.Getenv("CAPYCUT_DEBUG") != ""
+	if debug {
+		fmt.Printf("\n[DEBUG] Raw API Response:\n%s\n\n", string(body))
+	}
+
 	var apiResp responsesResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return nil, fmt.Errorf("failed to parse API response: %w\nResponse was: %s", err, string(body))
@@ -203,8 +213,11 @@ Or if there's an error:
 
 	// Extract content from the response
 	content := extractContent(apiResp)
+	if debug {
+		fmt.Printf("[DEBUG] Extracted content: %q\n\n", content)
+	}
 	if content == "" {
-		return nil, fmt.Errorf("no content in AI response")
+		return nil, fmt.Errorf("no content in AI response\nFull response: %s", string(body))
 	}
 
 	content = cleanJSONResponse(content)
