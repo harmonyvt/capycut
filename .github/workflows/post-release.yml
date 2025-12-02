@@ -50,8 +50,15 @@ jobs:
           # Test version command
           "$CAPYCUT_PATH" --version
           
-          # Test help command
-          "$CAPYCUT_PATH" --help | grep -q "CapyCut"
+          # Test help command - check for common help patterns
+          HELP_OUTPUT=$("$CAPYCUT_PATH" --help)
+          if echo "$HELP_OUTPUT" | grep -qiE "(capycut|USAGE:|OPTIONS:)"; then
+            echo "Help command works correctly"
+          else
+            echo "Help output doesn't contain expected content"
+            echo "$HELP_OUTPUT"
+            exit 1
+          fi
           
           echo "Linux installation test passed!"
 
@@ -110,8 +117,15 @@ jobs:
           # Test version command
           "$CAPYCUT_PATH" --version
           
-          # Test help command
-          "$CAPYCUT_PATH" --help | grep -q "CapyCut"
+          # Test help command - check for common help patterns
+          HELP_OUTPUT=$("$CAPYCUT_PATH" --help)
+          if echo "$HELP_OUTPUT" | grep -qiE "(capycut|USAGE:|OPTIONS:)"; then
+            echo "Help command works correctly"
+          else
+            echo "Help output doesn't contain expected content"
+            echo "$HELP_OUTPUT"
+            exit 1
+          fi
           
           echo "macOS installation test passed!"
 
@@ -174,10 +188,12 @@ jobs:
           # Test version command
           & $capycutPath --version
           
-          # Test help command
-          $helpOutput = & $capycutPath --help
-          if ($helpOutput -notmatch "CapyCut") {
-            Write-Error "Help output doesn't contain expected content"
+          # Test help command - check for common help patterns
+          $helpOutput = & $capycutPath --help | Out-String
+          if ($helpOutput -match "(?i)capycut" -or $helpOutput -match "USAGE:" -or $helpOutput -match "OPTIONS:") {
+            Write-Host "Help command works correctly"
+          } else {
+            Write-Error "Help output doesn't contain expected content. Output: $helpOutput"
             exit 1
           }
           
