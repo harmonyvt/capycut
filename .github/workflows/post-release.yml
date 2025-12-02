@@ -190,7 +190,9 @@ jobs:
           
           # Test help command - check for common help patterns
           $helpOutput = & $capycutPath --help | Out-String
-          if ($helpOutput -notmatch "(?i)capycut" -and $helpOutput -notmatch "USAGE:" -and $helpOutput -notmatch "OPTIONS:") {
+          if ($helpOutput -match "(?i)capycut" -or $helpOutput -match "USAGE:" -or $helpOutput -match "OPTIONS:") {
+            Write-Host "Help command works correctly"
+          } else {
             Write-Error "Help output doesn't contain expected content. Output: $helpOutput"
             exit 1
           }
