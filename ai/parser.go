@@ -31,10 +31,10 @@ type Parser struct {
 
 // Azure OpenAI Responses API request/response types
 type responsesRequest struct {
-	Model               string    `json:"model"`
-	Messages            []message `json:"messages"`
-	MaxCompletionTokens int       `json:"max_completion_tokens,omitempty"`
-	Temperature         float64   `json:"temperature,omitempty"`
+	Model           string    `json:"model"`
+	Input           []message `json:"input"`
+	MaxOutputTokens int       `json:"max_output_tokens,omitempty"`
+	Temperature     float64   `json:"temperature,omitempty"`
 }
 
 type message struct {
@@ -145,12 +145,12 @@ Or if there's an error:
 
 	reqBody := responsesRequest{
 		Model: p.model,
-		Messages: []message{
+		Input: []message{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userInput},
 		},
-		MaxCompletionTokens: 256,
-		Temperature:         0.1,
+		MaxOutputTokens: 256,
+		Temperature:     0.1,
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
