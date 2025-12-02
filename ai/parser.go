@@ -1,15 +1,15 @@
 package ai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"time"
-
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/azure"
 )
 
 // ClipRequest represents parsed clip parameters from natural language
@@ -21,11 +21,48 @@ type ClipRequest struct {
 
 // Parser handles AI-powered natural language parsing using Azure OpenAI
 type Parser struct {
-	client *openai.Client
-	model  string
+	endpoint   string
+	apiKey     string
+	model      string
+	apiVersion string
+	client     *http.Client
 }
 
-// NewParser creates a new AI parser using Azure OpenAI SDK
+// Azure OpenAI Responses API request/response types
+type responsesRequest struct {
+	Model               string    `json:"model"`
+	Messages            []message `json:"messages"`
+	MaxCompletionTokens int       `json:"max_completion_tokens,omitempty"`
+	Temperature         float64   `json:"temperature,omitempty"`
+}
+
+type message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type responsesResponse struct {
+	ID     string       `json:"id"`
+	Output []outputItem `json:"output"`
+	Error  *apiError    `json:"error,omitempty"`
+}
+
+type outputItem struct {
+	Type    string        `json:"type"`
+	Content []contentItem `json:"content,omitempty"`
+}
+
+type contentItem struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type apiError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// NewParser creates a new AI parser using Azure OpenAI Responses API
 func NewParser() (*Parser, error) {
 	endpoint := os.Getenv("AZURE_OPENAI_ENDPOINT")
 	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
@@ -44,21 +81,18 @@ func NewParser() (*Parser, error) {
 
 	// Default API version if not specified
 	if apiVersion == "" {
-		apiVersion = "2024-08-01-preview"
+		apiVersion = "2025-04-01-preview"
 	}
 
 	// Ensure endpoint doesn't have trailing slash
 	endpoint = strings.TrimSuffix(endpoint, "/")
 
-	// Create client using Azure OpenAI SDK with API key
-	client := openai.NewClient(
-		azure.WithEndpoint(endpoint, apiVersion),
-		azure.WithAPIKey(apiKey),
-	)
-
 	return &Parser{
-		client: &client,
-		model:  model,
+		endpoint:   endpoint,
+		apiKey:     apiKey,
+		model:      model,
+		apiVersion: apiVersion,
+		client:     &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }
 
@@ -84,37 +118,62 @@ Respond ONLY with valid JSON in this exact format:
 Or if there's an error:
 {"start_time": "", "end_time": "", "error": "description of the problem"}`, formatDuration(videoDuration))
 
-	resp, err := p.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model: openai.ChatModel(p.model),
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			{
-				OfSystem: &openai.ChatCompletionSystemMessageParam{
-					Content: openai.ChatCompletionSystemMessageParamContentUnion{
-						OfString: openai.String(systemPrompt),
-					},
-				},
-			},
-			{
-				OfUser: &openai.ChatCompletionUserMessageParam{
-					Content: openai.ChatCompletionUserMessageParamContentUnion{
-						OfString: openai.String(userInput),
-					},
-				},
-			},
+	reqBody := responsesRequest{
+		Model: p.model,
+		Messages: []message{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userInput},
 		},
-		MaxTokens:   openai.Int(256),
-		Temperature: openai.Float(0.1), // Low temperature for consistent parsing
-	})
+		MaxCompletionTokens: 256,
+		Temperature:         0.1,
+	}
 
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Build the URL: {endpoint}/openai/responses?api-version={version}
+	url := fmt.Sprintf("%s/openai/responses?api-version=%s", p.endpoint, p.apiVersion)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("AI request failed: %w", err)
 	}
+	defer resp.Body.Close()
 
-	if len(resp.Choices) == 0 {
-		return nil, fmt.Errorf("no response from AI")
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	content := resp.Choices[0].Message.Content
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("AI request failed: %s %s", resp.Status, string(body))
+	}
+
+	var apiResp responsesResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse API response: %w\nResponse was: %s", err, string(body))
+	}
+
+	if apiResp.Error != nil {
+		return nil, fmt.Errorf("API error: %s - %s", apiResp.Error.Code, apiResp.Error.Message)
+	}
+
+	// Extract content from the response
+	content := extractContent(apiResp)
+	if content == "" {
+		return nil, fmt.Errorf("no content in AI response")
+	}
+
 	content = cleanJSONResponse(content)
 
 	var clipReq ClipRequest
@@ -127,6 +186,20 @@ Or if there's an error:
 	}
 
 	return &clipReq, nil
+}
+
+// extractContent extracts the text content from the API response
+func extractContent(resp responsesResponse) string {
+	for _, output := range resp.Output {
+		if output.Type == "message" {
+			for _, c := range output.Content {
+				if c.Type == "output_text" || c.Type == "text" {
+					return c.Text
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // cleanJSONResponse removes markdown code blocks if present
@@ -156,10 +229,10 @@ Option 1: Create a .env file in the capycut directory:
   # Then edit .env and add your Azure OpenAI settings
 
 Option 2: Set environment variables:
-  export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
+  export AZURE_OPENAI_ENDPOINT="https://your-resource.cognitiveservices.azure.com"
   export AZURE_OPENAI_API_KEY="your-api-key"
   export AZURE_OPENAI_MODEL="gpt-4o"
-  export AZURE_OPENAI_API_VERSION="2024-08-01-preview"  # optional
+  export AZURE_OPENAI_API_VERSION="2025-04-01-preview"  # optional
 
 Get these from your Azure OpenAI resource in the Azure Portal.`
 }
