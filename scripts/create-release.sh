@@ -1,9 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 # Script to create a release for CapyCut
 # This should be run from the main/default branch
 
+# Configuration
+REPO_OWNER="harmonyvt"
+REPO_NAME="capycut"
 VERSION="${1:-0.0.5}"
 
 echo "Creating release for version ${VERSION}..."
@@ -48,7 +51,7 @@ git push origin "v${VERSION}"
 
 echo ""
 echo "Release v${VERSION} triggered! Check:"
-echo "  https://github.com/harmonyvt/capycut/actions"
+echo "  https://github.com/${REPO_OWNER}/${REPO_NAME}/actions"
 echo ""
 echo "Once the GitHub Actions workflow completes, the release will be available at:"
-echo "  https://github.com/harmonyvt/capycut/releases/tag/v${VERSION}"
+echo "  https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/tag/v${VERSION}"
