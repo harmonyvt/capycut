@@ -4,40 +4,79 @@ AI-powered video clipper CLI. Describe what you want to clip in natural language
 
 ## Installation
 
-### Prerequisites
-
-**FFmpeg is required.** Install it for your platform:
-
-- **macOS**: `brew install ffmpeg`
-- **Ubuntu/Debian**: `sudo apt install ffmpeg`
-- **Fedora**: `sudo dnf install ffmpeg`
-- **Arch**: `sudo pacman -S ffmpeg`
-- **Windows**: `winget install ffmpeg` or `choco install ffmpeg`
-
-### Download Binary
-
-Download the latest release from [GitHub Releases](https://github.com/harmonyvt/capycut/releases).
-
-#### macOS / Linux
+### macOS
 
 ```bash
-# Download (replace VERSION and ARCH as needed)
-curl -L https://github.com/harmonyvt/capycut/releases/latest/download/capycut_VERSION_darwin_arm64.tar.gz | tar xz
+# Install FFmpeg (required)
+brew install ffmpeg
 
-# Move to PATH
+# Download and install CapyCut (Apple Silicon)
+curl -L https://github.com/harmonyvt/capycut/releases/latest/download/capycut_darwin_arm64.tar.gz | tar xz
 sudo mv capycut /usr/local/bin/
+
+# For Intel Macs, use:
+# curl -L https://github.com/harmonyvt/capycut/releases/latest/download/capycut_darwin_amd64.tar.gz | tar xz
+# sudo mv capycut /usr/local/bin/
 ```
 
-#### Windows
+### Linux
 
-Download the `.zip` from releases, extract, and add to your PATH.
+```bash
+# Install FFmpeg (required)
+# Ubuntu/Debian
+sudo apt install ffmpeg
+
+# Fedora
+sudo dnf install ffmpeg
+
+# Arch
+sudo pacman -S ffmpeg
+
+# Download and install CapyCut
+curl -L https://github.com/harmonyvt/capycut/releases/latest/download/capycut_linux_amd64.tar.gz | tar xz
+sudo mv capycut /usr/local/bin/
+
+# For ARM64 (e.g., Raspberry Pi), use:
+# curl -L https://github.com/harmonyvt/capycut/releases/latest/download/capycut_linux_arm64.tar.gz | tar xz
+# sudo mv capycut /usr/local/bin/
+```
+
+### Windows
+
+1. **Install FFmpeg** (required):
+   ```powershell
+   # Using winget
+   winget install ffmpeg
+
+   # Or using Chocolatey
+   choco install ffmpeg
+   ```
+
+2. **Download CapyCut**:
+   - Download `capycut_windows_amd64.zip` from [GitHub Releases](https://github.com/harmonyvt/capycut/releases/latest)
+   - Extract the zip file
+   - Move `capycut.exe` to a directory in your PATH (e.g., `C:\Windows\System32` or create a custom directory)
+
+   Or via PowerShell:
+   ```powershell
+   # Download and extract
+   Invoke-WebRequest -Uri "https://github.com/harmonyvt/capycut/releases/latest/download/capycut_windows_amd64.zip" -OutFile "capycut.zip"
+   Expand-Archive -Path "capycut.zip" -DestinationPath "."
+
+   # Move to a directory in your PATH
+   Move-Item -Path "capycut.exe" -Destination "C:\Windows\System32\"
+   ```
 
 ### Build from Source
+
+Requires [Go 1.21+](https://go.dev/dl/).
 
 ```bash
 git clone https://github.com/harmonyvt/capycut.git
 cd capycut
 go build -o capycut .
+
+# On Windows, the output will be capycut.exe
 ```
 
 ## Configuration
