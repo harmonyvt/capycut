@@ -9,6 +9,13 @@ VERSION="${1:-0.0.5}"
 echo "Creating release for version ${VERSION}..."
 echo ""
 
+# Validate version format (semantic versioning: x.y.z)
+if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "Error: VERSION must be in semantic versioning format (x.y.z)"
+    echo "Example: ./scripts/create-release.sh 0.0.5"
+    exit 1
+fi
+
 # Check current branch
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 if [[ "$CURRENT_BRANCH" != "master" && "$CURRENT_BRANCH" != "main" ]]; then
