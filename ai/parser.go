@@ -13,6 +13,14 @@ import (
 	"time"
 )
 
+// Provider type for LLM backend
+type Provider string
+
+const (
+	ProviderAzure Provider = "azure"
+	ProviderLocal Provider = "local" // OpenAI-compatible (LM Studio, Ollama, etc.)
+)
+
 // ClipRequest represents parsed clip parameters from natural language
 type ClipRequest struct {
 	StartTime string `json:"start_time"` // Format: HH:MM:SS
@@ -20,48 +28,20 @@ type ClipRequest struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// Parser handles AI-powered natural language parsing using Azure OpenAI
+// Parser handles AI-powered natural language parsing
 type Parser struct {
+	provider   Provider
 	endpoint   string
 	apiKey     string
 	model      string
-	apiVersion string
+	apiVersion string // Only used for Azure
 	client     *http.Client
 }
 
-// Azure OpenAI Responses API request/response types
-type responsesRequest struct {
-	Model           string    `json:"model"`
-	Input           []message `json:"input"`
-	MaxOutputTokens int       `json:"max_output_tokens,omitempty"`
-}
-
+// Common message type
 type message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
-}
-
-type responsesResponse struct {
-	ID                string             `json:"id"`
-	Status            string             `json:"status"`
-	Output            []outputItem       `json:"output"`
-	Error             *apiError          `json:"error,omitempty"`
-	IncompleteDetails *incompleteDetails `json:"incomplete_details,omitempty"`
-}
-
-type incompleteDetails struct {
-	Reason string `json:"reason"`
-}
-
-type outputItem struct {
-	Type    string        `json:"type"`
-	Content []contentItem `json:"content,omitempty"`
-	Text    string        `json:"text,omitempty"` // Some responses have text directly
-}
-
-type contentItem struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
 }
 
 type apiError struct {
@@ -69,16 +49,99 @@ type apiError struct {
 	Message string `json:"message"`
 }
 
-// NewParser creates a new AI parser using Azure OpenAI Responses API
+// ============================================
+// Azure OpenAI Responses API types
+// ============================================
+type azureRequest struct {
+	Model           string    `json:"model"`
+	Input           []message `json:"input"`
+	MaxOutputTokens int       `json:"max_output_tokens,omitempty"`
+}
+
+type azureResponse struct {
+	ID                string             `json:"id"`
+	Status            string             `json:"status"`
+	Output            []azureOutputItem  `json:"output"`
+	Error             *apiError          `json:"error,omitempty"`
+	IncompleteDetails *incompleteDetails `json:"incomplete_details,omitempty"`
+}
+
+type azureOutputItem struct {
+	Type    string             `json:"type"`
+	Content []azureContentItem `json:"content,omitempty"`
+	Text    string             `json:"text,omitempty"`
+}
+
+type azureContentItem struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type incompleteDetails struct {
+	Reason string `json:"reason"`
+}
+
+// ============================================
+// OpenAI-compatible API types (LM Studio, Ollama)
+// ============================================
+type openAIRequest struct {
+	Model       string    `json:"model"`
+	Messages    []message `json:"messages"`
+	MaxTokens   int       `json:"max_tokens,omitempty"`
+	Temperature float64   `json:"temperature,omitempty"`
+}
+
+type openAIResponse struct {
+	ID      string         `json:"id"`
+	Choices []openAIChoice `json:"choices"`
+	Error   *apiError      `json:"error,omitempty"`
+}
+
+type openAIChoice struct {
+	Message      message `json:"message"`
+	FinishReason string  `json:"finish_reason"`
+}
+
+// NewParser creates a new AI parser, auto-detecting backend from environment
 func NewParser() (*Parser, error) {
+	debug := os.Getenv("CAPYCUT_DEBUG") != ""
+
+	// Check for local LLM first (LM Studio, Ollama)
+	localEndpoint := os.Getenv("LLM_ENDPOINT")
+	localModel := os.Getenv("LLM_MODEL")
+
+	if localEndpoint != "" {
+		// Default model for local LLMs
+		if localModel == "" {
+			localModel = "local-model"
+		}
+
+		localEndpoint = strings.TrimSuffix(localEndpoint, "/")
+
+		if debug {
+			fmt.Println("\n[DEBUG] Local LLM Configuration:")
+			fmt.Printf("  LLM_ENDPOINT: %s\n", localEndpoint)
+			fmt.Printf("  LLM_MODEL:    %s\n", localModel)
+			fmt.Printf("  API URL:      %s/v1/chat/completions\n", localEndpoint)
+			fmt.Println()
+		}
+
+		return &Parser{
+			provider: ProviderLocal,
+			endpoint: localEndpoint,
+			model:    localModel,
+			client:   &http.Client{Timeout: 120 * time.Second}, // Longer timeout for local models
+		}, nil
+	}
+
+	// Fall back to Azure OpenAI
 	endpoint := os.Getenv("AZURE_OPENAI_ENDPOINT")
 	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
 	model := os.Getenv("AZURE_OPENAI_MODEL")
 	apiVersion := os.Getenv("AZURE_OPENAI_API_VERSION")
-	debug := os.Getenv("CAPYCUT_DEBUG") != ""
 
 	if endpoint == "" {
-		return nil, fmt.Errorf("AZURE_OPENAI_ENDPOINT environment variable not set")
+		return nil, fmt.Errorf("no AI backend configured. Set LLM_ENDPOINT for local LLM or AZURE_OPENAI_ENDPOINT for Azure")
 	}
 	if apiKey == "" {
 		return nil, fmt.Errorf("AZURE_OPENAI_API_KEY environment variable not set")
@@ -87,39 +150,32 @@ func NewParser() (*Parser, error) {
 		return nil, fmt.Errorf("AZURE_OPENAI_MODEL environment variable not set")
 	}
 
-	// Default API version if not specified
 	if apiVersion == "" {
 		apiVersion = "2025-04-01-preview"
 	}
 
-	// Parse and normalize endpoint - extract just the base URL
+	// Parse and normalize endpoint
 	endpoint = strings.TrimSuffix(endpoint, "/")
 	parsedURL, err := url.Parse(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("invalid AZURE_OPENAI_ENDPOINT URL: %w", err)
 	}
-	// Use only scheme + host (strip any path or query params)
 	baseURL := fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
 
-	// Build the full API URL
-	fullURL := fmt.Sprintf("%s/openai/responses?api-version=%s", baseURL, apiVersion)
-
-	// Debug output
 	if debug {
 		fmt.Println("\n[DEBUG] Azure OpenAI Configuration:")
-		fmt.Printf("  AZURE_OPENAI_ENDPOINT (raw): %s\n", os.Getenv("AZURE_OPENAI_ENDPOINT"))
+		fmt.Printf("  AZURE_OPENAI_ENDPOINT (raw):  %s\n", os.Getenv("AZURE_OPENAI_ENDPOINT"))
 		fmt.Printf("  AZURE_OPENAI_ENDPOINT (base): %s\n", baseURL)
-		fmt.Printf("  AZURE_OPENAI_API_KEY:        %s...%s\n", apiKey[:4], apiKey[len(apiKey)-4:])
-		fmt.Printf("  AZURE_OPENAI_MODEL:          %s\n", model)
-		fmt.Printf("  AZURE_OPENAI_API_VERSION:    %s\n", apiVersion)
-		fmt.Printf("  Constructed URL:             %s\n", fullURL)
+		fmt.Printf("  AZURE_OPENAI_API_KEY:         %s...%s\n", apiKey[:4], apiKey[len(apiKey)-4:])
+		fmt.Printf("  AZURE_OPENAI_MODEL:           %s\n", model)
+		fmt.Printf("  AZURE_OPENAI_API_VERSION:     %s\n", apiVersion)
+		fmt.Printf("  API URL:                      %s/openai/responses?api-version=%s\n", baseURL, apiVersion)
 		fmt.Println()
 	}
 
-	endpoint = baseURL
-
 	return &Parser{
-		endpoint:   endpoint,
+		provider:   ProviderAzure,
+		endpoint:   baseURL,
 		apiKey:     apiKey,
 		model:      model,
 		apiVersion: apiVersion,
@@ -149,7 +205,105 @@ Respond ONLY with valid JSON in this exact format:
 Or if there's an error:
 {"start_time": "", "end_time": "", "error": "description of the problem"}`, formatDuration(videoDuration))
 
-	reqBody := responsesRequest{
+	switch p.provider {
+	case ProviderLocal:
+		return p.parseWithOpenAI(ctx, systemPrompt, userInput)
+	case ProviderAzure:
+		return p.parseWithAzure(ctx, systemPrompt, userInput)
+	default:
+		return nil, fmt.Errorf("unknown provider: %s", p.provider)
+	}
+}
+
+// parseWithOpenAI handles OpenAI-compatible APIs (LM Studio, Ollama, etc.)
+func (p *Parser) parseWithOpenAI(ctx context.Context, systemPrompt, userInput string) (*ClipRequest, error) {
+	debug := os.Getenv("CAPYCUT_DEBUG") != ""
+
+	reqBody := openAIRequest{
+		Model: p.model,
+		Messages: []message{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userInput},
+		},
+		MaxTokens:   512,
+		Temperature: 0.1,
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	apiURL := fmt.Sprintf("%s/v1/chat/completions", p.endpoint)
+
+	if debug {
+		fmt.Printf("[DEBUG] Request URL: %s\n", apiURL)
+		fmt.Printf("[DEBUG] Request body: %s\n\n", string(jsonBody))
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("AI request failed (is the LLM server running?): %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if debug {
+		fmt.Printf("[DEBUG] Response status: %s\n", resp.Status)
+		fmt.Printf("[DEBUG] Response body: %s\n\n", string(body))
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("AI request failed: %s\n  URL: %s\n  Response: %s", resp.Status, apiURL, string(body))
+	}
+
+	var apiResp openAIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse API response: %w\nResponse was: %s", err, string(body))
+	}
+
+	if apiResp.Error != nil {
+		return nil, fmt.Errorf("API error: %s - %s", apiResp.Error.Code, apiResp.Error.Message)
+	}
+
+	if len(apiResp.Choices) == 0 {
+		return nil, fmt.Errorf("no choices in AI response")
+	}
+
+	content := cleanJSONResponse(apiResp.Choices[0].Message.Content)
+
+	if debug {
+		fmt.Printf("[DEBUG] Extracted content: %q\n\n", content)
+	}
+
+	var clipReq ClipRequest
+	if err := json.Unmarshal([]byte(content), &clipReq); err != nil {
+		return nil, fmt.Errorf("failed to parse AI response: %w\nResponse was: %s", err, content)
+	}
+
+	if clipReq.Error != "" {
+		return nil, fmt.Errorf("AI could not parse request: %s", clipReq.Error)
+	}
+
+	return &clipReq, nil
+}
+
+// parseWithAzure handles Azure OpenAI Responses API
+func (p *Parser) parseWithAzure(ctx context.Context, systemPrompt, userInput string) (*ClipRequest, error) {
+	debug := os.Getenv("CAPYCUT_DEBUG") != ""
+
+	reqBody := azureRequest{
 		Model: p.model,
 		Input: []message{
 			{Role: "system", Content: systemPrompt},
@@ -163,10 +317,13 @@ Or if there's an error:
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Build the URL: {endpoint}/openai/responses?api-version={version}
-	url := fmt.Sprintf("%s/openai/responses?api-version=%s", p.endpoint, p.apiVersion)
+	apiURL := fmt.Sprintf("%s/openai/responses?api-version=%s", p.endpoint, p.apiVersion)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if debug {
+		fmt.Printf("[DEBUG] Request URL: %s\n", apiURL)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -186,23 +343,20 @@ Or if there's an error:
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		debug := os.Getenv("CAPYCUT_DEBUG") != ""
 		if debug {
 			fmt.Printf("\n[DEBUG] Request failed:\n")
-			fmt.Printf("  URL:         %s\n", url)
-			fmt.Printf("  Status:      %s\n", resp.Status)
-			fmt.Printf("  Response:    %s\n", string(body))
-			fmt.Println()
+			fmt.Printf("  URL:      %s\n", apiURL)
+			fmt.Printf("  Status:   %s\n", resp.Status)
+			fmt.Printf("  Response: %s\n\n", string(body))
 		}
-		return nil, fmt.Errorf("AI request failed: %s\n  URL: %s\n  Response: %s", resp.Status, url, string(body))
+		return nil, fmt.Errorf("AI request failed: %s\n  URL: %s\n  Response: %s", resp.Status, apiURL, string(body))
 	}
 
-	debug := os.Getenv("CAPYCUT_DEBUG") != ""
 	if debug {
 		fmt.Printf("\n[DEBUG] Raw API Response:\n%s\n\n", string(body))
 	}
 
-	var apiResp responsesResponse
+	var apiResp azureResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return nil, fmt.Errorf("failed to parse API response: %w\nResponse was: %s", err, string(body))
 	}
@@ -211,8 +365,7 @@ Or if there's an error:
 		return nil, fmt.Errorf("API error: %s - %s", apiResp.Error.Code, apiResp.Error.Message)
 	}
 
-	// Extract content from the response
-	content := extractContent(apiResp)
+	content := extractAzureContent(apiResp)
 	if debug {
 		fmt.Printf("[DEBUG] Extracted content: %q\n\n", content)
 	}
@@ -234,8 +387,8 @@ Or if there's an error:
 	return &clipReq, nil
 }
 
-// extractContent extracts the text content from the API response
-func extractContent(resp responsesResponse) string {
+// extractAzureContent extracts the text content from Azure API response
+func extractAzureContent(resp azureResponse) string {
 	for _, output := range resp.Output {
 		if output.Type == "message" {
 			for _, c := range output.Content {
@@ -251,7 +404,6 @@ func extractContent(resp responsesResponse) string {
 // cleanJSONResponse removes markdown code blocks if present
 func cleanJSONResponse(s string) string {
 	s = strings.TrimSpace(s)
-	// Remove ```json and ``` markers if present
 	s = strings.TrimPrefix(s, "```json")
 	s = strings.TrimPrefix(s, "```")
 	s = strings.TrimSuffix(s, "```")
@@ -266,27 +418,42 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
 }
 
-// GetAPIKeyHelp returns help text for setting up Azure OpenAI
+// GetAPIKeyHelp returns help text for setting up AI backend
 func GetAPIKeyHelp() string {
-	return `To use CapyCut, you need Azure OpenAI credentials.
+	return `To use CapyCut, you need an AI backend configured.
 
-Option 1: Create a .env file in the capycut directory:
-  cp .env.example .env
-  # Then edit .env and add your Azure OpenAI settings
+Option 1: Local LLM (FREE - no API key needed!)
+  
+  LM Studio (recommended):
+    1. Download from https://lmstudio.ai
+    2. Load a model (e.g., Llama, Mistral, Phi)
+    3. Start the local server (default port 1234)
+    4. Set: export LLM_ENDPOINT="http://localhost:1234"
 
-Option 2: Set environment variables:
+  Ollama:
+    1. Install from https://ollama.ai
+    2. Run: ollama run llama3.2
+    3. Set: export LLM_ENDPOINT="http://localhost:11434"
+           export LLM_MODEL="llama3.2"
+
+Option 2: Azure OpenAI
   export AZURE_OPENAI_ENDPOINT="https://your-resource.cognitiveservices.azure.com"
   export AZURE_OPENAI_API_KEY="your-api-key"
   export AZURE_OPENAI_MODEL="gpt-4o"
-  export AZURE_OPENAI_API_VERSION="2025-04-01-preview"  # optional
 
-Get these from your Azure OpenAI resource in the Azure Portal.`
+Or create a .env file with these values.`
 }
 
-// CheckConfig validates that all required Azure OpenAI config is present
+// CheckConfig validates that an AI backend is configured
 func CheckConfig() error {
+	// Check for local LLM first
+	if os.Getenv("LLM_ENDPOINT") != "" {
+		return nil // Local LLM configured, no API key needed
+	}
+
+	// Check Azure config
 	if os.Getenv("AZURE_OPENAI_ENDPOINT") == "" {
-		return fmt.Errorf("AZURE_OPENAI_ENDPOINT not set")
+		return fmt.Errorf("no AI backend configured")
 	}
 	if os.Getenv("AZURE_OPENAI_API_KEY") == "" {
 		return fmt.Errorf("AZURE_OPENAI_API_KEY not set")

@@ -35,12 +35,6 @@ Download the `.zip` from releases, extract, and add to your PATH.
 ### Build from Source
 
 ```bash
-go install github.com/harmonyvt/capycut@latest
-```
-
-Or clone and build:
-
-```bash
 git clone https://github.com/harmonyvt/capycut.git
 cd capycut
 go build -o capycut .
@@ -48,29 +42,50 @@ go build -o capycut .
 
 ## Configuration
 
-CapyCut uses Azure OpenAI for natural language parsing. Set up your credentials:
+CapyCut uses an LLM to parse natural language commands. Choose either a **local LLM** (free, private) or **Azure OpenAI**.
 
-### Option 1: Environment Variables
+### Option 1: Local LLM (Recommended - FREE!)
+
+Run models locally with [LM Studio](https://lmstudio.ai) or [Ollama](https://ollama.ai). No API keys needed!
+
+#### LM Studio
+
+1. Download [LM Studio](https://lmstudio.ai)
+2. Load a model (Llama 3, Mistral, Qwen, Phi, etc.)
+3. Start the local server (default: `http://localhost:1234`)
+4. Configure:
 
 ```bash
-export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
-export AZURE_OPENAI_API_KEY="your-api-key"
-export AZURE_OPENAI_MODEL="gpt-4o"
-export AZURE_OPENAI_API_VERSION="2024-08-01-preview"  # optional
+export LLM_ENDPOINT="http://localhost:1234"
 ```
 
-### Option 2: .env File
+#### Ollama
 
-Copy the example and fill in your values:
+1. Install [Ollama](https://ollama.ai)
+2. Pull and run a model: `ollama run llama3.2`
+3. Configure:
+
+```bash
+export LLM_ENDPOINT="http://localhost:11434"
+export LLM_MODEL="llama3.2"
+```
+
+### Option 2: Azure OpenAI
+
+```bash
+export AZURE_OPENAI_ENDPOINT="https://your-resource.cognitiveservices.azure.com"
+export AZURE_OPENAI_API_KEY="your-api-key"
+export AZURE_OPENAI_MODEL="gpt-4o"
+```
+
+### Using a .env File
 
 ```bash
 cp .env.example .env
-# Edit .env with your credentials
+# Edit .env with your settings
 ```
 
 ## Usage
-
-Simply run:
 
 ```bash
 capycut
@@ -78,31 +93,28 @@ capycut
 
 Then:
 1. Select a video file
-2. Describe what you want to clip in natural language:
+2. Describe what you want to clip:
    - "from 3 minutes to 5 minutes 30 seconds"
    - "first 2 minutes"
    - "start at 1:23, end at 4:56"
    - "last 45 seconds"
 3. Confirm and clip!
 
-### Version
+### Debug Mode
 
 ```bash
-capycut --version
+capycut --debug
 ```
+
+Shows detailed info about API calls for troubleshooting.
 
 ## Development
 
 ```bash
-# Clone the repo
 git clone https://github.com/harmonyvt/capycut.git
 cd capycut
-
-# Copy and configure environment
 cp .env.example .env
-# Edit .env with your Azure OpenAI credentials
 
-# Run commands
 make help          # Show all commands
 make run           # Build and run
 make test          # Run tests
