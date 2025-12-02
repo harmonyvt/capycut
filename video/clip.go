@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -103,7 +104,7 @@ func ClipVideo(params ClipParams) error {
 func CheckFFmpeg() error {
 	cmd := exec.Command("ffmpeg", "-version")
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ffmpeg not found. Please install ffmpeg first")
+		return fmt.Errorf("ffmpeg not found.\n\n%s", GetFFmpegInstallHelp())
 	}
 	return nil
 }
@@ -112,9 +113,43 @@ func CheckFFmpeg() error {
 func CheckFFprobe() error {
 	cmd := exec.Command("ffprobe", "-version")
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ffprobe not found. Please install ffmpeg first")
+		return fmt.Errorf("ffprobe not found.\n\n%s", GetFFmpegInstallHelp())
 	}
 	return nil
+}
+
+// GetFFmpegInstallHelp returns platform-specific installation instructions
+func GetFFmpegInstallHelp() string {
+	switch os := detectOS(); os {
+	case "darwin":
+		return `Install FFmpeg on macOS:
+  brew install ffmpeg
+
+Or download from: https://ffmpeg.org/download.html`
+	case "linux":
+		return `Install FFmpeg on Linux:
+  Ubuntu/Debian: sudo apt install ffmpeg
+  Fedora:        sudo dnf install ffmpeg
+  Arch:          sudo pacman -S ffmpeg
+
+Or download from: https://ffmpeg.org/download.html`
+	case "windows":
+		return `Install FFmpeg on Windows:
+  winget install ffmpeg
+  
+Or with Chocolatey:
+  choco install ffmpeg
+
+Or download from: https://ffmpeg.org/download.html
+Then add to PATH.`
+	default:
+		return `Please install FFmpeg from: https://ffmpeg.org/download.html`
+	}
+}
+
+// detectOS returns the current operating system
+func detectOS() string {
+	return runtime.GOOS
 }
 
 // IsVideoFile checks if a file has a video extension

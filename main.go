@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"capycut/ai"
@@ -14,6 +16,13 @@ import (
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/joho/godotenv"
+)
+
+// Build info - set via ldflags
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 // Styles
@@ -52,6 +61,20 @@ var (
 )
 
 func main() {
+	// Parse flags
+	versionFlag := flag.Bool("version", false, "Print version information")
+	shortVersionFlag := flag.Bool("v", false, "Print version information (short)")
+	flag.Parse()
+
+	if *versionFlag || *shortVersionFlag {
+		fmt.Printf("capycut %s\n", version)
+		fmt.Printf("  commit: %s\n", commit)
+		fmt.Printf("  built:  %s\n", date)
+		fmt.Printf("  go:     %s\n", runtime.Version())
+		fmt.Printf("  os/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+		os.Exit(0)
+	}
+
 	// Load .env file if it exists (won't error if missing)
 	_ = godotenv.Load()
 
