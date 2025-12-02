@@ -1,4 +1,4 @@
-.PHONY: build run test test-integration clean release-dry release install dev help download-test-video
+.PHONY: build run test test-integration clean release-dry release release-version install dev help download-test-video
 
 # Build variables
 VERSION ?= dev
@@ -24,7 +24,9 @@ help:
 	@echo "  make install          Install to /usr/local/bin"
 	@echo ""
 	@echo "  make release-dry      Test release build locally"
-	@echo "  make release          Create and push a new release tag"
+	@echo "  make release          Create and push a new release tag (interactive)"
+	@echo "  make release-version VERSION=x.y.z"
+	@echo "                        Create and push a specific release tag (non-interactive)"
 	@echo ""
 	@echo "  make debug            Run with delve debugger"
 	@echo "  make version          Show version info"
@@ -94,6 +96,28 @@ release:
 	echo ""; \
 	echo "Release v$$ver triggered! Check:"; \
 	echo "  https://github.com/harmonyvt/capycut/actions"
+
+# Create a specific release (non-interactive)
+# Usage: make release-version VERSION=0.0.5
+release-version:
+	@if [ -z "$(VERSION)" ]; then \
+		echo "Error: VERSION not specified. Usage: make release-version VERSION=0.0.5"; \
+		exit 1; \
+	fi
+	@if ! echo "$(VERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$$'; then \
+		echo "Error: VERSION must be in semantic versioning format (x.y.z)"; \
+		echo "Example: make release-version VERSION=0.0.5"; \
+		exit 1; \
+	fi
+	@echo "Current version tags:"
+	@git tag -l "v*" | tail -5 || echo "  (none)"
+	@echo ""
+	@echo "Creating release v$(VERSION)..."
+	@git tag -a "v$(VERSION)" -m "Release v$(VERSION)"
+	@git push origin "v$(VERSION)"
+	@echo ""
+	@echo "Release v$(VERSION) triggered! Check:"
+	@echo "  https://github.com/harmonyvt/capycut/actions"
 
 # Debug with delve
 debug:
