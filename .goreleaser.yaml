@@ -24,15 +24,28 @@ builds:
     binary: capycut
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
       {{- .Os }}_
       {{- .Arch }}
-    format_overrides:
-      - goos: windows
-        format: zip
+  - id: windows
+    formats:
+      - zip
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    builds:
+      - default
+    overrides:
+      - goos: linux
+        skip: true
+      - goos: darwin
+        skip: true
 
 checksum:
   name_template: 'checksums.txt'
