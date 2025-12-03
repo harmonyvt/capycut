@@ -1,5 +1,9 @@
 # CapyCut
 
+<!-- LATEST_RELEASE_START -->
+[![Latest Release](https://img.shields.io/github/v/release/harmonyvt/capycut?label=latest)](https://github.com/harmonyvt/capycut/releases/latest)
+<!-- LATEST_RELEASE_END -->
+
 AI-powered video clipper CLI. Describe what you want to clip in natural language, and CapyCut will do the rest.
 
 ## Installation

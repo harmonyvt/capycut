@@ -1,0 +1,60 @@
+name: Update README with Latest Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Get latest release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get the latest release tag
+          LATEST_TAG=$(gh release view --json tagName -q '.tagName')
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest release: $LATEST_TAG"
+
+      - name: Update README
+        run: |
+          VERSION="${{ steps.release.outputs.tag }}"
+          
+          # Check if version badge already exists
+          if grep -q "<!-- LATEST_RELEASE_START -->" README.md; then
+            # Update existing version section
+            sed -i '/<!-- LATEST_RELEASE_START -->/,/<!-- LATEST_RELEASE_END -->/c\<!-- LATEST_RELEASE_START -->\n[![Latest Release](https://img.shields.io/badge/latest-'"$VERSION"'-blue.svg)](https://github.com/harmonyvt/capycut/releases/'"$VERSION"')\n<!-- LATEST_RELEASE_END -->' README.md
+          else
+            # Insert version badge after the first heading
+            sed -i '/^# CapyCut$/a\\n<!-- LATEST_RELEASE_START -->\n[![Latest Release](https://img.shields.io/badge/latest-'"$VERSION"'-blue.svg)](https://github.com/harmonyvt/capycut/releases/'"$VERSION"')\n<!-- LATEST_RELEASE_END -->' README.md
+          fi
+          
+          echo "Updated README with version $VERSION"
+          cat README.md | head -20
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Check if there are changes to commit
+          if git diff --quiet README.md; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          
+          git add README.md
+          git commit -m "docs: update README with latest release ${{ steps.release.outputs.tag }}"
+          git push
