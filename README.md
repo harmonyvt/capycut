@@ -12,17 +12,17 @@ AI-powered video clipper CLI. Describe what you want to clip in natural language
 
 **macOS / Linux:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/harmonyvt/capycut/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/harmonyvt/capycut/master/install.sh | sh
 ```
 
 Or with wget:
 ```bash
-wget -qO- https://raw.githubusercontent.com/harmonyvt/capycut/main/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/harmonyvt/capycut/master/install.sh | sh
 ```
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/harmonyvt/capycut/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/harmonyvt/capycut/master/install.ps1 | iex
 ```
 
 ### Prerequisites
