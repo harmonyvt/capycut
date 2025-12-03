@@ -31,3 +31,4 @@ Thumbs.db
 # Distribution
 dist/
 *.mp4
+!assets/*.mp4

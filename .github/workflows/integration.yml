@@ -8,31 +8,33 @@ on:
   workflow_dispatch: # Allow manual triggering
 
 env:
-  # Discord video for testing
-  TEST_VIDEO_URL: "https://cdn.discordapp.com/attachments/719548482825748511/1321112526980780033/C566AC0F-5DDC-4F8D-9BF9-E8BE6A508198.mp4?ex=692f972b&is=692e45ab&hm=228adc7ec03ac02eac6b52a6a4cbfac4de32fe6659405a703c41ef65507d4138&"
+  # Test video is stored in the repository at assets/test_video.mp4
+  TEST_VIDEO_PATH: "assets/test_video.mp4"
   TEST_VIDEO_NAME: "test_video.mp4"
 
 jobs:
-  # Download test video once and share across jobs
+  # Verify test video from repository
   setup:
     runs-on: ubuntu-latest
     steps:
-      - name: Download test video
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify test video exists
         run: |
-          echo "Downloading test video..."
-          curl -L -o ${{ env.TEST_VIDEO_NAME }} "${{ env.TEST_VIDEO_URL }}"
-          ls -la ${{ env.TEST_VIDEO_NAME }}
+          echo "Verifying test video from repository..."
+          ls -la ${{ env.TEST_VIDEO_PATH }}
 
       - name: Verify video with ffprobe
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
-          ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 ${{ env.TEST_VIDEO_NAME }}
+          ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 ${{ env.TEST_VIDEO_PATH }}
 
       - name: Upload test video artifact
         uses: actions/upload-artifact@v4
         with:
           name: test-video
-          path: ${{ env.TEST_VIDEO_NAME }}
+          path: ${{ env.TEST_VIDEO_PATH }}
           retention-days: 1
 
   # Integration tests on Ubuntu with different shells
