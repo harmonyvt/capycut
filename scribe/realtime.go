@@ -30,13 +30,13 @@ const (
 
 // RealtimeClient handles WebSocket-based realtime transcription
 type RealtimeClient struct {
-	apiKey     string
-	config     *RealtimeConfig
-	conn       *websocket.Conn
-	mu         sync.Mutex
-	connected  bool
-	closed     bool
-	debug      bool
+	apiKey    string
+	config    *RealtimeConfig
+	conn      *websocket.Conn
+	mu        sync.Mutex
+	connected bool
+	closed    bool
+	debug     bool
 }
 
 // RealtimeTranscript represents a realtime transcription result
@@ -66,18 +66,18 @@ type RealtimeWord struct {
 
 // RealtimeMessage types for WebSocket communication
 type realtimeInitMessage struct {
-	Type              string `json:"type"`
-	ModelID           string `json:"model_id,omitempty"`
-	Language          string `json:"language,omitempty"`
-	SampleRate        int    `json:"sample_rate,omitempty"`
-	Encoding          string `json:"encoding,omitempty"`
+	Type              string             `json:"type"`
+	ModelID           string             `json:"model_id,omitempty"`
+	Language          string             `json:"language,omitempty"`
+	SampleRate        int                `json:"sample_rate,omitempty"`
+	Encoding          string             `json:"encoding,omitempty"`
 	EndpointingConfig *endpointingConfig `json:"endpointing_config,omitempty"`
 }
 
 type endpointingConfig struct {
-	Type            string `json:"type"`
-	MinEndpointingMs int   `json:"min_endpointing_ms,omitempty"`
-	MaxEndpointingMs int   `json:"max_endpointing_ms,omitempty"`
+	Type             string `json:"type"`
+	MinEndpointingMs int    `json:"min_endpointing_ms,omitempty"`
+	MaxEndpointingMs int    `json:"max_endpointing_ms,omitempty"`
 }
 
 type realtimeAudioMessage struct {
@@ -86,10 +86,10 @@ type realtimeAudioMessage struct {
 }
 
 type realtimeResponse struct {
-	Type       string             `json:"type"`
+	Type       string              `json:"type"`
 	Transcript *RealtimeTranscript `json:"transcript,omitempty"`
-	Error      *APIError          `json:"error,omitempty"`
-	Message    string             `json:"message,omitempty"`
+	Error      *APIError           `json:"error,omitempty"`
+	Message    string              `json:"message,omitempty"`
 }
 
 // NewRealtimeClient creates a new realtime transcription client
@@ -199,22 +199,30 @@ func (c *RealtimeClient) readResponses() {
 	}()
 
 	for {
+		// Get connection reference while holding lock
 		c.mu.Lock()
-		if c.closed {
+		if c.closed || c.conn == nil {
 			c.mu.Unlock()
 			return
 		}
+		// Keep a reference to conn and check closed state atomically
 		conn := c.conn
+		closed := c.closed
 		c.mu.Unlock()
 
-		if conn == nil {
+		if closed {
 			return
 		}
 
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			if c.config.OnError != nil && !c.closed {
-				c.config.OnError(fmt.Errorf("WebSocket read error: %w", err))
+			c.mu.Lock()
+			isClosed := c.closed
+			onError := c.config.OnError
+			c.mu.Unlock()
+
+			if onError != nil && !isClosed {
+				onError(fmt.Errorf("WebSocket read error: %w", err))
 			}
 			return
 		}
@@ -297,9 +305,22 @@ func (c *RealtimeClient) StreamFile(ctx context.Context, filePath string) error 
 
 // StreamReader streams audio from an io.Reader for realtime transcription
 func (c *RealtimeClient) StreamReader(ctx context.Context, reader io.Reader) error {
-	// Chunk size for sending audio (about 100ms of audio at 16kHz, 16-bit mono)
-	chunkSize := c.config.SampleRate * 2 / 10 // 100ms chunks
+	// Calculate chunk size and duration based on actual sample rate
+	// For 16-bit audio (2 bytes per sample), mono channel
+	const bytesPerSample = 2
+	const chunkDurationMs = 100 // 100ms chunks
+
+	sampleRate := c.config.SampleRate
+	if sampleRate == 0 {
+		sampleRate = DefaultSampleRate
+	}
+
+	// Calculate bytes for the chunk duration: (sampleRate * bytesPerSample * ms) / 1000
+	chunkSize := (sampleRate * bytesPerSample * chunkDurationMs) / 1000
 	buffer := make([]byte, chunkSize)
+
+	// Calculate actual chunk duration for pacing
+	chunkDuration := time.Duration(chunkDurationMs) * time.Millisecond
 
 	for {
 		select {
@@ -320,10 +341,17 @@ func (c *RealtimeClient) StreamReader(ctx context.Context, reader io.Reader) err
 			if err := c.SendAudio(buffer[:n]); err != nil {
 				return fmt.Errorf("send error: %w", err)
 			}
-		}
 
-		// Pace the sending to match real-time playback
-		time.Sleep(100 * time.Millisecond)
+			// Pace the sending based on actual audio duration of bytes read
+			// This accounts for partial reads
+			actualDuration := time.Duration(n) * time.Second / time.Duration(sampleRate*bytesPerSample)
+			if actualDuration > 0 {
+				time.Sleep(actualDuration)
+			}
+		} else {
+			// If no bytes read but no EOF, use default chunk duration
+			time.Sleep(chunkDuration)
+		}
 	}
 }
 

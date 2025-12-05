@@ -23,6 +23,8 @@ type MediaInfo struct {
 	HasVideo   bool
 	HasAudio   bool
 	FileSize   int64
+	// Warnings contains non-fatal issues encountered during metadata extraction
+	Warnings []string
 }
 
 // DefaultAudioExtractionOptions returns sensible defaults for audio extraction
@@ -94,22 +96,38 @@ func GetMediaInfo(path string) (*MediaInfo, error) {
 		FileSize: fileInfo.Size(),
 		HasVideo: hasVideo,
 		HasAudio: audioInfo["codec_name"] != "",
+		Warnings: make([]string, 0),
 	}
 
 	if sr, ok := audioInfo["sample_rate"]; ok {
-		info.SampleRate, _ = strconv.Atoi(sr)
+		val, err := strconv.Atoi(sr)
+		if err != nil {
+			info.Warnings = append(info.Warnings, fmt.Sprintf("failed to parse sample_rate %q: %v", sr, err))
+		} else {
+			info.SampleRate = val
+		}
 	}
 	if ch, ok := audioInfo["channels"]; ok {
-		info.Channels, _ = strconv.Atoi(ch)
+		val, err := strconv.Atoi(ch)
+		if err != nil {
+			info.Warnings = append(info.Warnings, fmt.Sprintf("failed to parse channels %q: %v", ch, err))
+		} else {
+			info.Channels = val
+		}
 	}
 	if codec, ok := audioInfo["codec_name"]; ok {
 		info.Codec = codec
 	}
 	if br, ok := formatInfo["bit_rate"]; ok {
-		info.BitRate, _ = strconv.Atoi(br)
+		val, err := strconv.Atoi(br)
+		if err != nil {
+			info.Warnings = append(info.Warnings, fmt.Sprintf("failed to parse bit_rate %q: %v", br, err))
+		} else {
+			info.BitRate = val
+		}
 	}
-	if fmt, ok := formatInfo["format_name"]; ok {
-		info.Format = fmt
+	if fmtName, ok := formatInfo["format_name"]; ok {
+		info.Format = fmtName
 	}
 
 	return info, nil
@@ -149,9 +167,9 @@ func ExtractAudio(inputPath string, opts *AudioExtractionOptions) (string, error
 
 	// Build ffmpeg command
 	args := []string{
-		"-y",           // Overwrite output
+		"-y",            // Overwrite output
 		"-i", inputPath, // Input file
-		"-vn", // No video
+		"-vn",                                // No video
 		"-ar", strconv.Itoa(opts.SampleRate), // Sample rate
 		"-ac", strconv.Itoa(opts.Channels), // Channels
 	}

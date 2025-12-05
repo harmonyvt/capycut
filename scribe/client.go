@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -41,9 +42,24 @@ type Client struct {
 type ClientOption func(*Client)
 
 // WithBaseURL sets a custom base URL (for testing)
-func WithBaseURL(url string) ClientOption {
+// Returns an option that validates the URL format before setting it
+func WithBaseURL(baseURL string) ClientOption {
 	return func(c *Client) {
-		c.baseURL = strings.TrimSuffix(url, "/")
+		// Validate URL format
+		parsed, err := url.Parse(baseURL)
+		if err != nil {
+			// Keep default URL if invalid
+			return
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			// Keep default URL if scheme is not http/https
+			return
+		}
+		if parsed.Host == "" {
+			// Keep default URL if host is empty
+			return
+		}
+		c.baseURL = strings.TrimSuffix(baseURL, "/")
 	}
 }
 
