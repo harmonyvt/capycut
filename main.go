@@ -57,9 +57,9 @@ var (
 			MarginBottom(1)
 
 	capybaraLogo = `
-    ╭─────────────────────────────────────╮
-    │  🦫 CapyCut - AI Video Clipper      │
-    ╰─────────────────────────────────────╯`
+    ╭──────────────────────────────────────────╮
+    │  🦫 CapyCut - AI Media Tools             │
+    ╰──────────────────────────────────────────╯`
 )
 
 // CLI flags
@@ -95,58 +95,65 @@ func init() {
 
 func printHelp() {
 	help := `
-🦫 CapyCut - AI-powered video clipper
+🦫 CapyCut - AI-powered media tools
 
 USAGE:
     capycut [OPTIONS]
-    capycut --file <video> --prompt <description>
+    capycut [COMMAND] [OPTIONS]
 
-OPTIONS:
+COMMANDS:
+    clip                    Video clipping mode (default)
+    transcribe              Image to Markdown transcription
+
+VIDEO CLIPPING OPTIONS:
     -f, --file <path>       Path to video file
     -p, --prompt <text>     Clip description in natural language
                             Examples:
                               "first 2 minutes"
                               "from 3:00 to 5:30"
                               "last 45 seconds"
-                              "start at 1:23, end at 4:56"
-    -o, --output <path>     Output file path (optional, auto-generated if not set)
-    
-    --provider <name>       LLM provider: 'local' or 'azure' (overrides LLM_PROVIDER env var)
-    
-    --setup                 Run interactive setup wizard to configure CapyCut
-    --update                Update capycut to the latest version
+    -o, --output <path>     Output file path (optional)
+    --provider <name>       LLM provider: 'local' or 'azure'
+
+IMAGE TRANSCRIPTION:
+    capycut transcribe [OPTIONS] <images...>
+
+    -o, --output <dir>      Output directory (default: ./output)
+    -m, --model <name>      Gemini model: flash, pro, flash20
+    --chapters              Auto-detect chapters
+    --combine               Combine all pages into one file
+
+GENERAL OPTIONS:
+    --setup                 Run interactive setup wizard
+    --update                Update to latest version
     --debug                 Enable debug output
     -v, --version           Print version information
     -h, --help              Show this help message
 
 ENVIRONMENT VARIABLES:
+  Video Clipping:
+    LLM_PROVIDER            'local' or 'azure'
+    AZURE_OPENAI_ENDPOINT   Azure OpenAI endpoint
+    AZURE_OPENAI_API_KEY    Azure OpenAI API key
+    AZURE_OPENAI_MODEL      Model deployment name
 
-  Provider Selection:
-    LLM_PROVIDER            Set to 'local' or 'azure' (or use --provider flag)
-                            Auto-detects if not set: uses 'local' if LLM_ENDPOINT is set,
-                            otherwise defaults to 'azure'
-
-  Local LLM (LM Studio, Ollama, etc.):
-    LLM_ENDPOINT            API endpoint (e.g., http://localhost:1234)
-    LLM_MODEL               Model name to use
-    LLM_API_KEY             API key (optional for most local LLMs)
-
-  Azure OpenAI:
-    AZURE_OPENAI_ENDPOINT   Your Azure OpenAI endpoint URL
-    AZURE_OPENAI_API_KEY    Your Azure OpenAI API key
-    AZURE_OPENAI_MODEL      Model deployment name (e.g., gpt-4o)
-    AZURE_OPENAI_API_VERSION  API version (optional, defaults to 2025-04-01-preview)
+  Image Transcription:
+    GEMINI_API_KEY          Google Gemini API key
+    GOOGLE_API_KEY          Alternative API key variable
 
   Debug:
-    CAPYCUT_DEBUG           Set to any value to enable debug output
+    CAPYCUT_DEBUG           Enable debug output
 
 EXAMPLES:
-    # Interactive mode (select file and enter prompt via UI)
+    # Interactive mode
     capycut
 
-    # Non-interactive mode with arguments
+    # Video clipping
     capycut -f video.mp4 -p "first 2 minutes"
-    capycut --file video.mp4 --prompt "from 1:00 to 3:30" --output clip.mp4
+
+    # Image transcription
+    capycut transcribe ./scanned_pages/
+    capycut transcribe --chapters -o ./book/ ./pages/*.png
 
     # Use specific LLM provider via flag
     capycut --provider local -f video.mp4 -p "last 30 seconds"
@@ -766,6 +773,14 @@ func runSetupWizard() {
 }
 
 func main() {
+	// Check for subcommands before parsing flags
+	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "transcribe" {
+		// Handle transcribe subcommand
+		runTranscribeCommand(args[1:])
+		return
+	}
+
 	flag.Parse()
 
 	if helpFlag {
@@ -813,25 +828,22 @@ func main() {
 	// Print header
 	fmt.Println(titleStyle.Render(capybaraLogo))
 
-	// Check for ffmpeg
-	if err := video.CheckFFmpeg(); err != nil {
-		fmt.Println(errorStyle.Render("Error: " + err.Error()))
-		os.Exit(1)
-	}
-	if err := video.CheckFFprobe(); err != nil {
-		fmt.Println(errorStyle.Render("Error: " + err.Error()))
-		os.Exit(1)
-	}
-
-	// Check for LLM config
-	if err := ai.CheckConfig(); err != nil {
-		fmt.Println(errorStyle.Render("Error: " + err.Error()))
-		fmt.Println(infoStyle.Render(ai.GetAPIKeyHelp()))
-		os.Exit(1)
-	}
-
-	// If file and prompt are provided via args, run non-interactive mode
+	// If file and prompt are provided via args, run non-interactive video mode
 	if fileFlag != "" && promptFlag != "" {
+		// Check for ffmpeg for video mode
+		if err := video.CheckFFmpeg(); err != nil {
+			fmt.Println(errorStyle.Render("Error: " + err.Error()))
+			os.Exit(1)
+		}
+		if err := video.CheckFFprobe(); err != nil {
+			fmt.Println(errorStyle.Render("Error: " + err.Error()))
+			os.Exit(1)
+		}
+		if err := ai.CheckConfig(); err != nil {
+			fmt.Println(errorStyle.Render("Error: " + err.Error()))
+			fmt.Println(infoStyle.Render(ai.GetAPIKeyHelp()))
+			os.Exit(1)
+		}
 		runNonInteractive(fileFlag, promptFlag, outputFlag)
 		return
 	}
@@ -843,14 +855,135 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Main interactive loop
+	// Main interactive menu
+	runMainMenu()
+}
+
+// runMainMenu displays the main menu for selecting features
+func runMainMenu() {
 	for {
-		if !runClipWorkflow() {
+		var choice string
+		mainSelect := huh.NewSelect[string]().
+			Title("What would you like to do?").
+			Options(
+				huh.NewOption("🎬 Clip a video", "clip"),
+				huh.NewOption("📸 Transcribe images to Markdown", "transcribe"),
+				huh.NewOption("⚙️  Setup wizard", "setup"),
+				huh.NewOption("🔄 Check for updates", "update"),
+				huh.NewOption("❌ Exit", "exit"),
+			).
+			Value(&choice)
+
+		err := huh.NewForm(huh.NewGroup(mainSelect)).
+			WithTheme(huh.ThemeCatppuccin()).
+			Run()
+
+		if err != nil {
+			break
+		}
+
+		switch choice {
+		case "clip":
+			// Check for video clipping prerequisites
+			if err := video.CheckFFmpeg(); err != nil {
+				fmt.Println(errorStyle.Render("Error: " + err.Error()))
+				continue
+			}
+			if err := video.CheckFFprobe(); err != nil {
+				fmt.Println(errorStyle.Render("Error: " + err.Error()))
+				continue
+			}
+			if err := ai.CheckConfig(); err != nil {
+				fmt.Println(errorStyle.Render("Error: " + err.Error()))
+				fmt.Println(infoStyle.Render(ai.GetAPIKeyHelp()))
+				continue
+			}
+			if !runClipWorkflow() {
+				continue
+			}
+
+		case "transcribe":
+			// Check for transcription prerequisites
+			if err := checkTranscribeConfig(); err != nil {
+				fmt.Println(errorStyle.Render("Error: " + err.Error()))
+				fmt.Println(infoStyle.Render(getTranscribeAPIHelp()))
+				continue
+			}
+			if !runTranscribeWorkflow() {
+				continue
+			}
+
+		case "setup":
+			runSetupWizard()
+
+		case "update":
+			if err := runSelfUpdate(); err != nil {
+				fmt.Println(errorStyle.Render("Update failed: " + err.Error()))
+			}
+
+		case "exit":
+			fmt.Println(subtitleStyle.Render("\n🦫 Thanks for using CapyCut! Bye bye!"))
+			return
+		}
+	}
+}
+
+// runTranscribeCommand handles the transcribe subcommand
+func runTranscribeCommand(args []string) {
+	// Enable debug mode if flag present
+	for _, arg := range args {
+		if arg == "--debug" {
+			os.Setenv("CAPYCUT_DEBUG", "1")
 			break
 		}
 	}
 
-	fmt.Println(subtitleStyle.Render("\n🦫 Thanks for using CapyCut! Bye bye!"))
+	// Load .env file
+	_ = godotenv.Load()
+
+	// Print header
+	fmt.Println(titleStyle.Render(capybaraLogo))
+
+	// Parse arguments
+	opts, sources := parseTranscribeArgs(args)
+
+	// If no sources provided, run interactive mode
+	if len(sources) == 0 {
+		// Check config
+		if err := checkTranscribeConfig(); err != nil {
+			fmt.Println(errorStyle.Render("Error: " + err.Error()))
+			fmt.Println(infoStyle.Render(getTranscribeAPIHelp()))
+			os.Exit(1)
+		}
+		runTranscribeWorkflow()
+		fmt.Println(subtitleStyle.Render("\n🦫 Thanks for using CapyCut! Bye bye!"))
+		return
+	}
+
+	// Check config for non-interactive mode
+	if err := checkTranscribeConfig(); err != nil {
+		fmt.Println(errorStyle.Render("Error: " + err.Error()))
+		fmt.Println(infoStyle.Render(getTranscribeAPIHelp()))
+		os.Exit(1)
+	}
+
+	// Run non-interactive transcription
+	runNonInteractiveTranscribe(sources, opts.OutputDir, opts.Model, opts.DetectChapters, opts.CombinePages)
+}
+
+// getTranscribeAPIHelp returns help text for Gemini API setup
+func getTranscribeAPIHelp() string {
+	return `To use image transcription, you need a Google Gemini API key.
+
+1. Go to https://aistudio.google.com/apikey
+2. Sign in with your Google account
+3. Click "Create API key"
+4. Set the environment variable:
+
+   export GEMINI_API_KEY="your-api-key"
+
+Or create a .env file with:
+   GEMINI_API_KEY=your-api-key`
 }
 
 func runNonInteractive(videoPath, clipDescription, customOutput string) {
