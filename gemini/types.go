@@ -7,9 +7,14 @@ import (
 
 // Model constants for Gemini models
 const (
+	// ModelGemini3Pro is the latest and most capable model (released Nov 2025)
+	// Best for complex reasoning, agentic coding, and multimodal understanding
+	ModelGemini3Pro = "gemini-3-pro-preview"
+	// ModelGemini3ProThinking is Gemini 3 Pro with enhanced reasoning/thinking
+	ModelGemini3ProThinking = "gemini-3-pro-preview-11-2025-thinking"
 	// ModelGemini25Flash is the fast, efficient model for most tasks
 	ModelGemini25Flash = "gemini-2.5-flash-preview-05-20"
-	// ModelGemini25Pro is the most capable model for complex reasoning
+	// ModelGemini25Pro is Gemini 2.5 Pro for complex reasoning
 	ModelGemini25Pro = "gemini-2.5-pro-preview-05-06"
 	// ModelGemini20Flash is the previous generation fast model
 	ModelGemini20Flash = "gemini-2.0-flash"

@@ -554,8 +554,8 @@ func TestCreateSmartBatches(t *testing.T) {
 		},
 		{
 			name:       "many small images split by count",
-			imageSizes: make([]int64, 20), // 20 small images
-			wantBatches: 2, // Should split at 16 images
+			imageSizes: make([]int64, 25), // 25 small images
+			wantBatches: 2, // Should split at MaxImagesPerRequest (20)
 		},
 		{
 			name:       "single large image gets own batch",

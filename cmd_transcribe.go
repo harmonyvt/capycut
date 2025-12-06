@@ -164,9 +164,10 @@ func runTranscribeWorkflow() bool {
 	modelSelect := huh.NewSelect[string]().
 		Title("Select Gemini model").
 		Options(
-			huh.NewOption("Gemini 2.5 Flash (Fast, recommended)", gemini.ModelGemini25Flash),
-			huh.NewOption("Gemini 2.5 Pro (Most capable)", gemini.ModelGemini25Pro),
-			huh.NewOption("Gemini 2.0 Flash (Previous generation)", gemini.ModelGemini20Flash),
+			huh.NewOption("Gemini 3 Pro (Latest, most capable)", gemini.ModelGemini3Pro),
+			huh.NewOption("Gemini 3 Pro Thinking (Enhanced reasoning)", gemini.ModelGemini3ProThinking),
+			huh.NewOption("Gemini 2.5 Flash (Fast)", gemini.ModelGemini25Flash),
+			huh.NewOption("Gemini 2.5 Pro (Previous generation)", gemini.ModelGemini25Pro),
 		).
 		Value(&modelChoice)
 
@@ -398,7 +399,7 @@ func runNonInteractiveTranscribe(sources []string, outputDir, model string, dete
 
 	// Set defaults
 	if model == "" {
-		model = gemini.ModelGemini25Flash
+		model = gemini.ModelGemini3Pro
 	}
 	if outputDir == "" {
 		outputDir = "./output"
@@ -487,6 +488,10 @@ func askToContinueTranscribe() bool {
 
 func getModelDisplayName(model string) string {
 	switch model {
+	case gemini.ModelGemini3Pro:
+		return "Gemini 3 Pro"
+	case gemini.ModelGemini3ProThinking:
+		return "Gemini 3 Pro Thinking"
 	case gemini.ModelGemini25Flash:
 		return "Gemini 2.5 Flash"
 	case gemini.ModelGemini25Pro:
@@ -541,9 +546,10 @@ ARGUMENTS:
 OPTIONS:
     -o, --output <dir>      Output directory (default: ./output)
     -m, --model <name>      Gemini model to use:
-                              flash   - Gemini 2.5 Flash (default, fast)
-                              pro     - Gemini 2.5 Pro (most capable)
-                              flash20 - Gemini 2.0 Flash (previous gen)
+                              3pro     - Gemini 3 Pro (default, most capable)
+                              3think   - Gemini 3 Pro Thinking (enhanced reasoning)
+                              flash    - Gemini 2.5 Flash (fast)
+                              pro      - Gemini 2.5 Pro (previous gen)
 
     --chapters              Auto-detect and split by chapters
     --combine               Combine all pages into single file
@@ -593,6 +599,10 @@ func parseTranscribeArgs(args []string) (*TranscribeOptions, []string) {
 		case "-m", "--model":
 			if i+1 < len(args) {
 				switch args[i+1] {
+				case "3pro", "3-pro", "gemini-3-pro":
+					opts.Model = gemini.ModelGemini3Pro
+				case "3think", "3-think", "thinking":
+					opts.Model = gemini.ModelGemini3ProThinking
 				case "flash", "2.5-flash":
 					opts.Model = gemini.ModelGemini25Flash
 				case "pro", "2.5-pro":

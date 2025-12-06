@@ -23,21 +23,33 @@ const (
 	// DefaultTimeout for API requests
 	DefaultTimeout = 5 * time.Minute
 
-	// MaxImagesPerRequest is the maximum images per API call
-	MaxImagesPerRequest = 16
+	// MaxImagesPerRequest is the maximum images per API call (Gemini supports up to 3600)
+	// We use a conservative limit for better performance and reliability
+	MaxImagesPerRequest = 20
 
-	// MaxFileSize is the maximum file size per image (20MB)
+	// MaxFileSize is the maximum file size per image (20MB for inline, 2GB via File API)
 	MaxFileSize = 20 * 1024 * 1024
 
 	// MaxTotalImages is the maximum number of images per transcription job
 	MaxTotalImages = 100
 
-	// MaxPayloadSize is the maximum total payload size per request (15MB to be safe)
-	// Base64 encoding adds ~33% overhead, so this allows ~11MB of raw images
-	MaxPayloadSize = 15 * 1024 * 1024
+	// MaxInlineRequestSize is the official Gemini limit for inline data requests
+	// Total request size including prompts, system instructions, and all base64 encoded images
+	MaxInlineRequestSize = 20 * 1024 * 1024
+
+	// MaxPayloadSize is our practical limit accounting for base64 overhead (~1.37x) and prompt text
+	// 20MB limit / 1.4 overhead factor = ~14.3MB raw images, we use 14MB to be safe
+	MaxPayloadSize = 14 * 1024 * 1024
 
 	// MaxConcurrentRequests is the maximum parallel API calls
+	// Free tier: 5 RPM, Tier 1: 500 RPM, Tier 2+: 1000+ RPM
 	MaxConcurrentRequests = 3
+
+	// GeminiContextWindow is the maximum input tokens (1M, 2M coming soon)
+	GeminiContextWindow = 1000000
+
+	// GeminiMaxOutputTokens is the maximum output tokens
+	GeminiMaxOutputTokens = 65535
 )
 
 // Client is the Google Gemini API client
@@ -154,10 +166,10 @@ func (c *Client) TranscribeImages(ctx context.Context, req *TranscribeRequest) (
 		imageInfos = append(imageInfos, info)
 	}
 
-	// Set defaults
+	// Set defaults - use Gemini 3 Pro as default (most capable model)
 	model := req.Model
 	if model == "" {
-		model = ModelGemini25Flash
+		model = ModelGemini3Pro
 	}
 
 	// Create smart batches based on payload size
