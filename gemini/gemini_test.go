@@ -3,6 +3,7 @@ package gemini
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -531,4 +532,136 @@ func containsHelper(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestCreateSmartBatches(t *testing.T) {
+	client, _ := NewClient("test-key")
+
+	tests := []struct {
+		name       string
+		imageSizes []int64 // sizes in bytes
+		wantBatches int
+	}{
+		{
+			name:       "small images fit in one batch",
+			imageSizes: []int64{100000, 200000, 300000}, // ~600KB total
+			wantBatches: 1,
+		},
+		{
+			name:       "images split by size limit",
+			imageSizes: []int64{5000000, 5000000, 5000000, 5000000}, // 4x5MB = 20MB
+			wantBatches: 2, // Should split due to payload size limit
+		},
+		{
+			name:       "many small images split by count",
+			imageSizes: make([]int64, 20), // 20 small images
+			wantBatches: 2, // Should split at 16 images
+		},
+		{
+			name:       "single large image gets own batch",
+			imageSizes: []int64{100000, 12000000, 100000}, // 100KB, 12MB, 100KB
+			wantBatches: 3, // Large image needs its own batch
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create mock ImageInfo slice
+			images := make([]*ImageInfo, len(tt.imageSizes))
+			for i, size := range tt.imageSizes {
+				if size == 0 {
+					size = 10000 // Default small size for count test
+				}
+				images[i] = &ImageInfo{
+					Path:      fmt.Sprintf("/fake/image_%d.png", i),
+					Filename:  fmt.Sprintf("image_%d.png", i),
+					Size:      size,
+					PageIndex: i,
+				}
+			}
+
+			batches := client.createSmartBatches(images)
+
+			if len(batches) != tt.wantBatches {
+				t.Errorf("createSmartBatches() created %d batches, want %d", len(batches), tt.wantBatches)
+				for i, batch := range batches {
+					totalSize := int64(0)
+					for _, img := range batch {
+						totalSize += img.Size
+					}
+					t.Logf("  Batch %d: %d images, %d bytes", i, len(batch), totalSize)
+				}
+			}
+
+			// Verify all images are accounted for
+			totalImages := 0
+			for _, batch := range batches {
+				totalImages += len(batch)
+			}
+			if totalImages != len(images) {
+				t.Errorf("Total images in batches = %d, want %d", totalImages, len(images))
+			}
+		})
+	}
+}
+
+func TestCreateSmartBatches_PayloadSizeLimit(t *testing.T) {
+	client, _ := NewClient("test-key")
+
+	// Create images that together exceed MaxPayloadSize
+	// MaxPayloadSize is 15MB, with 1.4x overhead factor
+	// So ~10.7MB of raw images should trigger a split
+	images := []*ImageInfo{
+		{Path: "/fake/1.png", Filename: "1.png", Size: 4000000, PageIndex: 0}, // 4MB
+		{Path: "/fake/2.png", Filename: "2.png", Size: 4000000, PageIndex: 1}, // 4MB
+		{Path: "/fake/3.png", Filename: "3.png", Size: 4000000, PageIndex: 2}, // 4MB -> total ~12MB raw, ~17MB with overhead
+		{Path: "/fake/4.png", Filename: "4.png", Size: 1000000, PageIndex: 3}, // 1MB
+	}
+
+	batches := client.createSmartBatches(images)
+
+	// Should create at least 2 batches due to size
+	if len(batches) < 2 {
+		t.Errorf("Expected at least 2 batches for large payload, got %d", len(batches))
+	}
+
+	// First batch should not exceed estimated payload limit
+	const overheadFactor = 1.4
+	for i, batch := range batches {
+		totalEstimated := int64(0)
+		for _, img := range batch {
+			totalEstimated += int64(float64(img.Size) * overheadFactor)
+		}
+		if totalEstimated > MaxPayloadSize && len(batch) > 1 {
+			t.Errorf("Batch %d estimated size %d exceeds MaxPayloadSize %d", i, totalEstimated, MaxPayloadSize)
+		}
+	}
+}
+
+func TestCreateSmartBatches_PreservesOrder(t *testing.T) {
+	client, _ := NewClient("test-key")
+
+	// Create 25 images
+	images := make([]*ImageInfo, 25)
+	for i := 0; i < 25; i++ {
+		images[i] = &ImageInfo{
+			Path:      fmt.Sprintf("/fake/page_%02d.png", i+1),
+			Filename:  fmt.Sprintf("page_%02d.png", i+1),
+			Size:      100000,
+			PageIndex: i,
+		}
+	}
+
+	batches := client.createSmartBatches(images)
+
+	// Verify page order is preserved across batches
+	expectedIndex := 0
+	for _, batch := range batches {
+		for _, img := range batch {
+			if img.PageIndex != expectedIndex {
+				t.Errorf("Page order broken: expected index %d, got %d", expectedIndex, img.PageIndex)
+			}
+			expectedIndex++
+		}
+	}
 }

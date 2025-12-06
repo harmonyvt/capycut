@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -30,6 +31,13 @@ const (
 
 	// MaxTotalImages is the maximum number of images per transcription job
 	MaxTotalImages = 100
+
+	// MaxPayloadSize is the maximum total payload size per request (15MB to be safe)
+	// Base64 encoding adds ~33% overhead, so this allows ~11MB of raw images
+	MaxPayloadSize = 15 * 1024 * 1024
+
+	// MaxConcurrentRequests is the maximum parallel API calls
+	MaxConcurrentRequests = 3
 )
 
 // Client is the Google Gemini API client
@@ -115,7 +123,15 @@ func NewClientFromEnv(opts ...ClientOption) (*Client, error) {
 	return NewClient(apiKey, opts...)
 }
 
-// TranscribeImages transcribes a set of images to markdown
+// batchResult holds the result of processing a batch
+type batchResult struct {
+	batchIndex int
+	pages      []*PageContent
+	tokens     int
+	err        error
+}
+
+// TranscribeImages transcribes a set of images to markdown using smart batching
 func (c *Client) TranscribeImages(ctx context.Context, req *TranscribeRequest) (*TranscribeResponse, error) {
 	startTime := time.Now()
 
@@ -144,24 +160,24 @@ func (c *Client) TranscribeImages(ctx context.Context, req *TranscribeRequest) (
 		model = ModelGemini25Flash
 	}
 
-	// Process images in batches
-	var allPageContents []*PageContent
-	var totalTokens int
+	// Create smart batches based on payload size
+	batches := c.createSmartBatches(imageInfos)
 
-	for i := 0; i < len(imageInfos); i += MaxImagesPerRequest {
-		end := i + MaxImagesPerRequest
-		if end > len(imageInfos) {
-			end = len(imageInfos)
+	if c.debug {
+		fmt.Printf("[DEBUG] Created %d batches from %d images\n", len(batches), len(imageInfos))
+		for i, batch := range batches {
+			totalSize := int64(0)
+			for _, img := range batch {
+				totalSize += img.Size
+			}
+			fmt.Printf("[DEBUG] Batch %d: %d images, %.2f MB\n", i+1, len(batch), float64(totalSize)/(1024*1024))
 		}
+	}
 
-		batch := imageInfos[i:end]
-		pageContents, tokens, err := c.processBatch(ctx, batch, req, model)
-		if err != nil {
-			return nil, fmt.Errorf("batch starting at page %d: %w", i+1, err)
-		}
-
-		allPageContents = append(allPageContents, pageContents...)
-		totalTokens += tokens
+	// Process batches in parallel with worker pool
+	allPageContents, totalTokens, err := c.processBatchesParallel(ctx, batches, req, model)
+	if err != nil {
+		return nil, err
 	}
 
 	// Detect chapters and organize content
@@ -180,6 +196,150 @@ func (c *Client) TranscribeImages(ctx context.Context, req *TranscribeRequest) (
 		ProcessingTime: time.Since(startTime),
 		TokensUsed:     totalTokens,
 	}, nil
+}
+
+// createSmartBatches groups images into batches based on payload size limits
+func (c *Client) createSmartBatches(images []*ImageInfo) [][]*ImageInfo {
+	var batches [][]*ImageInfo
+	var currentBatch []*ImageInfo
+	var currentSize int64
+
+	// Calculate base64 overhead factor (~1.37x for base64 encoding + JSON overhead)
+	const overheadFactor = 1.4
+
+	for _, img := range images {
+		estimatedSize := int64(float64(img.Size) * overheadFactor)
+
+		// Check if adding this image would exceed limits
+		wouldExceedSize := currentSize+estimatedSize > MaxPayloadSize
+		wouldExceedCount := len(currentBatch) >= MaxImagesPerRequest
+
+		if (wouldExceedSize || wouldExceedCount) && len(currentBatch) > 0 {
+			// Start a new batch
+			batches = append(batches, currentBatch)
+			currentBatch = nil
+			currentSize = 0
+		}
+
+		// Handle case where single image exceeds payload size
+		if estimatedSize > MaxPayloadSize {
+			if c.debug {
+				fmt.Printf("[DEBUG] Warning: Image %s (%.2f MB) is large, processing alone\n",
+					img.Filename, float64(img.Size)/(1024*1024))
+			}
+			// Process this image alone in its own batch
+			batches = append(batches, []*ImageInfo{img})
+			continue
+		}
+
+		currentBatch = append(currentBatch, img)
+		currentSize += estimatedSize
+	}
+
+	// Don't forget the last batch
+	if len(currentBatch) > 0 {
+		batches = append(batches, currentBatch)
+	}
+
+	return batches
+}
+
+// processBatchesParallel processes batches concurrently with a worker pool
+func (c *Client) processBatchesParallel(ctx context.Context, batches [][]*ImageInfo, req *TranscribeRequest, model string) ([]*PageContent, int, error) {
+	if len(batches) == 0 {
+		return nil, 0, nil
+	}
+
+	// For small number of batches, process sequentially to avoid overhead
+	if len(batches) <= 2 {
+		return c.processBatchesSequential(ctx, batches, req, model)
+	}
+
+	// Process in parallel with worker pool
+	results := make(chan *batchResult, len(batches))
+	sem := make(chan struct{}, MaxConcurrentRequests)
+
+	var wg sync.WaitGroup
+
+	for i, batch := range batches {
+		wg.Add(1)
+		go func(idx int, imgs []*ImageInfo) {
+			defer wg.Done()
+
+			// Acquire semaphore
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			// Check context cancellation
+			select {
+			case <-ctx.Done():
+				results <- &batchResult{batchIndex: idx, err: ctx.Err()}
+				return
+			default:
+			}
+
+			if c.debug {
+				fmt.Printf("[DEBUG] Processing batch %d/%d (%d images)...\n", idx+1, len(batches), len(imgs))
+			}
+
+			pages, tokens, err := c.processBatch(ctx, imgs, req, model)
+			results <- &batchResult{
+				batchIndex: idx,
+				pages:      pages,
+				tokens:     tokens,
+				err:        err,
+			}
+		}(i, batch)
+	}
+
+	// Close results channel when all workers are done
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
+	resultMap := make(map[int]*batchResult)
+	for result := range results {
+		if result.err != nil {
+			return nil, 0, fmt.Errorf("batch %d failed: %w", result.batchIndex+1, result.err)
+		}
+		resultMap[result.batchIndex] = result
+	}
+
+	// Combine results in order
+	var allPages []*PageContent
+	totalTokens := 0
+
+	for i := 0; i < len(batches); i++ {
+		result := resultMap[i]
+		allPages = append(allPages, result.pages...)
+		totalTokens += result.tokens
+	}
+
+	return allPages, totalTokens, nil
+}
+
+// processBatchesSequential processes batches one by one (for small jobs)
+func (c *Client) processBatchesSequential(ctx context.Context, batches [][]*ImageInfo, req *TranscribeRequest, model string) ([]*PageContent, int, error) {
+	var allPages []*PageContent
+	totalTokens := 0
+
+	for i, batch := range batches {
+		if c.debug {
+			fmt.Printf("[DEBUG] Processing batch %d/%d (%d images)...\n", i+1, len(batches), len(batch))
+		}
+
+		pages, tokens, err := c.processBatch(ctx, batch, req, model)
+		if err != nil {
+			return nil, 0, fmt.Errorf("batch %d failed: %w", i+1, err)
+		}
+
+		allPages = append(allPages, pages...)
+		totalTokens += tokens
+	}
+
+	return allPages, totalTokens, nil
 }
 
 // getImageInfo validates and extracts info about an image file
