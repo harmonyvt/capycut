@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"capycut/gemini"
+	"capycut/tui"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
@@ -30,8 +31,24 @@ type TranscribeOptions struct {
 	Overwrite                bool
 }
 
+// runTranscribeWorkflowNew runs the new Bubble Tea based transcription UI
+func runTranscribeWorkflowNew() bool {
+	continueApp, err := tui.RunTranscribeUI()
+	if err != nil {
+		fmt.Println(errorStyle.Render("Error: " + err.Error()))
+		return askToContinueTranscribe()
+	}
+	return continueApp
+}
+
 // runTranscribeWorkflow runs the interactive image transcription workflow
+// Set USE_NEW_TUI=1 environment variable to use the new Bubble Tea UI
 func runTranscribeWorkflow() bool {
+	// Check if user wants to use the new TUI
+	if os.Getenv("USE_NEW_TUI") == "1" || os.Getenv("CAPYCUT_NEW_UI") == "1" {
+		return runTranscribeWorkflowNew()
+	}
+
 	// Step 1: Select images
 	var imageSources []string
 
