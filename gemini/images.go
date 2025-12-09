@@ -1,11 +1,20 @@
 package gemini
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	// Register image formats for decoding
+	_ "image/gif"
+
+	"golang.org/x/image/draw"
 )
 
 // LoadImages loads and validates image files from various sources
@@ -230,7 +239,7 @@ func GetImageStats(paths []string) (totalSize int64, count int, err error) {
 }
 
 // FormatSize formats a byte size as a human-readable string
-func FormatSize(bytes int64) string {
+func FormatSize(b int64) string {
 	const (
 		KB = 1024
 		MB = KB * 1024
@@ -238,13 +247,123 @@ func FormatSize(bytes int64) string {
 	)
 
 	switch {
-	case bytes >= GB:
-		return fmt.Sprintf("%.2f GB", float64(bytes)/GB)
-	case bytes >= MB:
-		return fmt.Sprintf("%.2f MB", float64(bytes)/MB)
-	case bytes >= KB:
-		return fmt.Sprintf("%.2f KB", float64(bytes)/KB)
+	case b >= GB:
+		return fmt.Sprintf("%.2f GB", float64(b)/GB)
+	case b >= MB:
+		return fmt.Sprintf("%.2f MB", float64(b)/MB)
+	case b >= KB:
+		return fmt.Sprintf("%.2f KB", float64(b)/KB)
 	default:
-		return fmt.Sprintf("%d bytes", bytes)
+		return fmt.Sprintf("%d bytes", b)
 	}
+}
+
+// ResizeOptions configures image resizing
+type ResizeOptions struct {
+	MaxWidth  int // Maximum width in pixels (0 = no limit)
+	MaxHeight int // Maximum height in pixels (0 = no limit)
+	Quality   int // JPEG quality (1-100, default 85)
+}
+
+// DefaultResizeOptions returns sensible defaults for local LLM
+func DefaultResizeOptions() ResizeOptions {
+	return ResizeOptions{
+		MaxWidth:  1024, // Reasonable for OCR
+		MaxHeight: 1024,
+		Quality:   85,
+	}
+}
+
+// ResizeImage resizes an image to fit within the specified dimensions
+// Returns the resized image as bytes (JPEG format for efficiency)
+func ResizeImage(path string, opts ResizeOptions) ([]byte, string, error) {
+	// Read the image file
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to open image: %w", err)
+	}
+	defer file.Close()
+
+	// Decode the image
+	img, format, err := image.Decode(file)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to decode image: %w", err)
+	}
+
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+
+	// Calculate new dimensions while maintaining aspect ratio
+	newWidth, newHeight := width, height
+
+	if opts.MaxWidth > 0 && width > opts.MaxWidth {
+		newWidth = opts.MaxWidth
+		newHeight = int(float64(height) * float64(opts.MaxWidth) / float64(width))
+	}
+
+	if opts.MaxHeight > 0 && newHeight > opts.MaxHeight {
+		newHeight = opts.MaxHeight
+		newWidth = int(float64(newWidth) * float64(opts.MaxHeight) / float64(newHeight))
+	}
+
+	// If no resizing needed, just return the original file
+	if newWidth == width && newHeight == height {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, "", err
+		}
+		mimeType := getMIMEType(strings.ToLower(filepath.Ext(path)))
+		return data, mimeType, nil
+	}
+
+	// Create resized image
+	resized := image.NewRGBA(image.Rect(0, 0, newWidth, newHeight))
+
+	// Use high-quality resampling
+	draw.CatmullRom.Scale(resized, resized.Bounds(), img, bounds, draw.Over, nil)
+
+	// Encode to JPEG (more efficient for transmission)
+	var buf bytes.Buffer
+	quality := opts.Quality
+	if quality <= 0 || quality > 100 {
+		quality = 85
+	}
+
+	// Use PNG for images that might have transparency, JPEG otherwise
+	var mimeType string
+	if format == "png" || format == "gif" {
+		err = png.Encode(&buf, resized)
+		mimeType = "image/png"
+	} else {
+		err = jpeg.Encode(&buf, resized, &jpeg.Options{Quality: quality})
+		mimeType = "image/jpeg"
+	}
+
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to encode resized image: %w", err)
+	}
+
+	return buf.Bytes(), mimeType, nil
+}
+
+// ResizeImageIfNeeded resizes an image only if it exceeds the max size in bytes
+func ResizeImageIfNeeded(path string, maxBytes int64, opts ResizeOptions) ([]byte, string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// If file is small enough, just return it as-is
+	if info.Size() <= maxBytes {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, "", err
+		}
+		mimeType := getMIMEType(strings.ToLower(filepath.Ext(path)))
+		return data, mimeType, nil
+	}
+
+	// Resize the image
+	return ResizeImage(path, opts)
 }

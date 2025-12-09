@@ -3,6 +3,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -332,4 +333,172 @@ func joinStrings(strs []string, sep string) string {
 		result += sep + strs[i]
 	}
 	return result
+}
+
+// AIAgentStatus represents the status of an AI agent task
+type AIAgentStatus int
+
+const (
+	AgentIdle AIAgentStatus = iota
+	AgentConnecting
+	AgentProcessing
+	AgentWaitingResponse
+	AgentParsing
+	AgentComplete
+	AgentError
+)
+
+// AIAgentInfo holds information about an AI agent's current activity
+type AIAgentInfo struct {
+	Name        string        // Agent name (e.g., "Gemini 3 Pro", "Local LLM", "Claude")
+	Provider    string        // Provider type (e.g., "gemini", "local", "azure_anthropic")
+	Status      AIAgentStatus // Current status
+	Task        string        // What the agent is doing
+	Detail      string        // Additional detail (e.g., "Processing batch 2/5")
+	Progress    float64       // Progress 0.0-1.0
+	TokensUsed  int           // Tokens consumed
+	ElapsedTime string        // Time elapsed
+}
+
+// AgentStatusText returns a human-readable status string
+func (s AIAgentStatus) String() string {
+	switch s {
+	case AgentIdle:
+		return "Idle"
+	case AgentConnecting:
+		return "Connecting"
+	case AgentProcessing:
+		return "Processing"
+	case AgentWaitingResponse:
+		return "Waiting for response"
+	case AgentParsing:
+		return "Parsing response"
+	case AgentComplete:
+		return "Complete"
+	case AgentError:
+		return "Error"
+	default:
+		return "Unknown"
+	}
+}
+
+// AgentStatusIcon returns an icon for the status
+func (s AIAgentStatus) Icon() string {
+	switch s {
+	case AgentIdle:
+		return "[ ]"
+	case AgentConnecting:
+		return "[~]"
+	case AgentProcessing:
+		return "[>]"
+	case AgentWaitingResponse:
+		return "[.]"
+	case AgentParsing:
+		return "[*]"
+	case AgentComplete:
+		return "[x]"
+	case AgentError:
+		return "[!]"
+	default:
+		return "[?]"
+	}
+}
+
+// RenderAgentCard renders a card showing AI agent status
+func RenderAgentCard(agent AIAgentInfo, width int) string {
+	var borderColor lipgloss.AdaptiveColor
+	var statusStyle lipgloss.Style
+
+	switch agent.Status {
+	case AgentComplete:
+		borderColor = ColorSuccess
+		statusStyle = lipgloss.NewStyle().Foreground(ColorSuccess)
+	case AgentError:
+		borderColor = ColorError
+		statusStyle = lipgloss.NewStyle().Foreground(ColorError)
+	case AgentProcessing, AgentWaitingResponse, AgentParsing:
+		borderColor = ColorPrimary
+		statusStyle = lipgloss.NewStyle().Foreground(ColorPrimary)
+	default:
+		borderColor = ColorBorder
+		statusStyle = lipgloss.NewStyle().Foreground(ColorMuted)
+	}
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorText)
+	subtitleStyle := lipgloss.NewStyle().Foreground(ColorSubtle)
+	detailStyle := lipgloss.NewStyle().Foreground(ColorMuted)
+
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(0, 2).
+		Width(width)
+
+	// Build content
+	var lines []string
+
+	// Header: Icon + Name + Status
+	header := statusStyle.Render(agent.Status.Icon()) + " " +
+		titleStyle.Render(agent.Name) + " " +
+		subtitleStyle.Render("("+agent.Provider+")")
+	lines = append(lines, header)
+
+	// Task description
+	if agent.Task != "" {
+		lines = append(lines, "  "+statusStyle.Render(agent.Status.String())+": "+agent.Task)
+	}
+
+	// Detail (e.g., batch progress)
+	if agent.Detail != "" {
+		lines = append(lines, "  "+detailStyle.Render(agent.Detail))
+	}
+
+	// Progress bar (if processing)
+	if agent.Status == AgentProcessing || agent.Status == AgentWaitingResponse {
+		if agent.Progress > 0 {
+			progressStr := ProgressBar(int(agent.Progress*100), 100, width-8)
+			lines = append(lines, "  "+progressStr)
+		}
+	}
+
+	// Stats line
+	var stats []string
+	if agent.TokensUsed > 0 {
+		stats = append(stats, fmt.Sprintf("Tokens: %d", agent.TokensUsed))
+	}
+	if agent.ElapsedTime != "" {
+		stats = append(stats, "Time: "+agent.ElapsedTime)
+	}
+	if len(stats) > 0 {
+		lines = append(lines, "  "+detailStyle.Render(joinStrings(stats, " | ")))
+	}
+
+	content := joinStrings(lines, "\n")
+	return cardStyle.Render(content)
+}
+
+// RenderMultiAgentStatus renders status for multiple agents (for two-stage pipeline)
+func RenderMultiAgentStatus(agents []AIAgentInfo, width int) string {
+	var sections []string
+
+	for _, agent := range agents {
+		sections = append(sections, RenderAgentCard(agent, width))
+	}
+
+	return joinStrings(sections, "\n")
+}
+
+// RenderProcessingStatus renders a simple processing status line
+func RenderProcessingStatus(spinner, message, detail string) string {
+	var sb strings.Builder
+
+	sb.WriteString(spinner + " ")
+	sb.WriteString(BodyStyle.Render(message))
+
+	if detail != "" {
+		sb.WriteString("\n  ")
+		sb.WriteString(MutedStyle.Render(detail))
+	}
+
+	return sb.String()
 }

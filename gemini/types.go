@@ -1,8 +1,21 @@
 // Package gemini provides a client for the Google Gemini API for image-to-markdown transcription.
+// It also supports OpenAI-compatible APIs (LM Studio, Ollama, etc.) for local LLM transcription.
 package gemini
 
 import (
 	"time"
+)
+
+// Provider type for transcription backend
+type Provider string
+
+const (
+	// ProviderGemini uses Google's Gemini API
+	ProviderGemini Provider = "gemini"
+	// ProviderLocal uses local LLM via OpenAI-compatible APIs (LM Studio, Ollama, etc.)
+	ProviderLocal Provider = "local"
+	// ProviderAzureAnthropic uses Azure Anthropic (Claude) API
+	ProviderAzureAnthropic Provider = "azure_anthropic"
 )
 
 // Model constants for Gemini models
@@ -158,14 +171,14 @@ type TOCEntry struct {
 
 // PageContent represents the extracted content from a single page
 type PageContent struct {
-	PageNumber int
-	Text       string
-	HasHeading bool
-	HeadingText string
-	HeadingLevel int
+	PageNumber     int
+	Text           string
+	HasHeading     bool
+	HeadingText    string
+	HeadingLevel   int
 	IsChapterStart bool
-	ChapterTitle string
-	Images []ImageDescription
+	ChapterTitle   string
+	Images         []ImageDescription
 }
 
 // ImageDescription describes a non-text image on a page
@@ -199,9 +212,9 @@ func (e *APIError) Error() string {
 
 // GenerateContentRequest is the request structure for the Gemini API
 type GenerateContentRequest struct {
-	Contents         []*Content         `json:"contents"`
-	GenerationConfig *GenerationConfig  `json:"generationConfig,omitempty"`
-	SafetySettings   []*SafetySetting   `json:"safetySettings,omitempty"`
+	Contents          []*Content        `json:"contents"`
+	GenerationConfig  *GenerationConfig `json:"generationConfig,omitempty"`
+	SafetySettings    []*SafetySetting  `json:"safetySettings,omitempty"`
 	SystemInstruction *Content          `json:"systemInstruction,omitempty"`
 }
 
@@ -225,12 +238,12 @@ type InlineData struct {
 
 // GenerationConfig contains generation parameters
 type GenerationConfig struct {
-	Temperature     *float64 `json:"temperature,omitempty"`
-	TopP            *float64 `json:"topP,omitempty"`
-	TopK            *int     `json:"topK,omitempty"`
-	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
-	StopSequences   []string `json:"stopSequences,omitempty"`
-	ResponseMimeType string  `json:"responseMimeType,omitempty"`
+	Temperature      *float64 `json:"temperature,omitempty"`
+	TopP             *float64 `json:"topP,omitempty"`
+	TopK             *int     `json:"topK,omitempty"`
+	MaxOutputTokens  *int     `json:"maxOutputTokens,omitempty"`
+	StopSequences    []string `json:"stopSequences,omitempty"`
+	ResponseMimeType string   `json:"responseMimeType,omitempty"`
 }
 
 // SafetySetting configures content safety filters
@@ -247,8 +260,8 @@ type GenerateContentResponse struct {
 
 // Candidate represents a generated response candidate
 type Candidate struct {
-	Content       *Content       `json:"content"`
-	FinishReason  string         `json:"finishReason"`
+	Content       *Content        `json:"content"`
+	FinishReason  string          `json:"finishReason"`
 	SafetyRatings []*SafetyRating `json:"safetyRatings,omitempty"`
 }
 
@@ -263,4 +276,236 @@ type UsageMetadata struct {
 	PromptTokenCount     int `json:"promptTokenCount"`
 	CandidatesTokenCount int `json:"candidatesTokenCount"`
 	TotalTokenCount      int `json:"totalTokenCount"`
+}
+
+// ============================================
+// Local LLM types (LM Studio, Ollama - OpenAI-compatible API)
+// ============================================
+
+// LocalLLMMessage represents a message for local LLM
+type LocalLLMMessage struct {
+	Role    string            `json:"role"`
+	Content []LocalLLMContent `json:"content,omitempty"`
+}
+
+// LocalLLMContent represents content for local LLM (text or image)
+type LocalLLMContent struct {
+	Type     string            `json:"type"`
+	Text     string            `json:"text,omitempty"`
+	ImageURL *LocalLLMImageURL `json:"image_url,omitempty"`
+}
+
+// LocalLLMImageURL represents an image URL for local LLM
+type LocalLLMImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// LocalLLMRequest is the request structure for local LLM
+type LocalLLMRequest struct {
+	Model       string            `json:"model"`
+	Messages    []LocalLLMMessage `json:"messages"`
+	MaxTokens   int               `json:"max_tokens,omitempty"`
+	Temperature float64           `json:"temperature,omitempty"`
+}
+
+// LocalLLMResponse is the response structure from local LLM
+type LocalLLMResponse struct {
+	ID      string           `json:"id"`
+	Choices []LocalLLMChoice `json:"choices"`
+	Usage   *LocalLLMUsage   `json:"usage,omitempty"`
+	Error   *LocalLLMError   `json:"error,omitempty"`
+}
+
+// LocalLLMChoice represents a choice in the local LLM response
+type LocalLLMChoice struct {
+	Index        int                   `json:"index"`
+	Message      LocalLLMChoiceMessage `json:"message"`
+	FinishReason string                `json:"finish_reason"`
+}
+
+// LocalLLMChoiceMessage represents the message in a choice
+type LocalLLMChoiceMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// LocalLLMUsage contains token usage information for local LLM
+type LocalLLMUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+// LocalLLMError represents an error from local LLM
+type LocalLLMError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// ============================================
+// Progress callback types for UI updates
+// ============================================
+
+// ProgressStatus represents the current status of AI processing
+type ProgressStatus int
+
+const (
+	StatusIdle ProgressStatus = iota
+	StatusConnecting
+	StatusSendingRequest
+	StatusWaitingResponse
+	StatusParsingResponse
+	StatusProcessingBatch
+	StatusRefining
+	StatusComplete
+	StatusError
+)
+
+// String returns a human-readable status description
+func (s ProgressStatus) String() string {
+	switch s {
+	case StatusIdle:
+		return "Ready"
+	case StatusConnecting:
+		return "Connecting to AI"
+	case StatusSendingRequest:
+		return "Sending request"
+	case StatusWaitingResponse:
+		return "Waiting for response"
+	case StatusParsingResponse:
+		return "Parsing response"
+	case StatusProcessingBatch:
+		return "Processing batch"
+	case StatusRefining:
+		return "Refining with text model"
+	case StatusComplete:
+		return "Complete"
+	case StatusError:
+		return "Error"
+	default:
+		return "Unknown"
+	}
+}
+
+// ProgressUpdate contains information about AI processing progress
+type ProgressUpdate struct {
+	// Status is the current processing status
+	Status ProgressStatus
+
+	// Provider is the AI provider being used (gemini, local, azure_anthropic)
+	Provider string
+
+	// Model is the model name being used
+	Model string
+
+	// Message is a human-readable status message
+	Message string
+
+	// Detail provides additional context (e.g., "Image 3 of 10")
+	Detail string
+
+	// Progress is the overall progress (0.0 to 1.0)
+	Progress float64
+
+	// CurrentBatch is the current batch number (1-based)
+	CurrentBatch int
+
+	// TotalBatches is the total number of batches
+	TotalBatches int
+
+	// CurrentImage is the current image being processed (1-based)
+	CurrentImage int
+
+	// TotalImages is the total number of images
+	TotalImages int
+
+	// TokensUsed is the total tokens consumed so far
+	TokensUsed int
+
+	// Elapsed is the time elapsed since processing started
+	Elapsed time.Duration
+
+	// Stage indicates the pipeline stage (1 = vision, 2 = text refinement)
+	Stage int
+
+	// TotalStages is the total number of stages (1 or 2)
+	TotalStages int
+
+	// Error contains any error that occurred
+	Error error
+
+	// === Transparency fields for AI request/response logging ===
+
+	// RequestInfo contains details about the AI request being made
+	RequestInfo *AIRequestInfo
+
+	// ResponseInfo contains details about the AI response received
+	ResponseInfo *AIResponseInfo
+}
+
+// AIRequestInfo contains transparency details about an AI request
+type AIRequestInfo struct {
+	// Endpoint URL (sanitized, no API keys)
+	Endpoint string
+
+	// Method HTTP method (POST, GET, etc.)
+	Method string
+
+	// ContentType of the request
+	ContentType string
+
+	// DataSummary describes what data is being sent
+	DataSummary string
+
+	// ImageCount for image transcription requests
+	ImageCount int
+
+	// TotalDataSize in bytes
+	TotalDataSize int64
+
+	// PromptPreview shows first N characters of the prompt
+	PromptPreview string
+
+	// Parameters like temperature, max_tokens, etc.
+	Parameters map[string]string
+}
+
+// AIResponseInfo contains transparency details about an AI response
+type AIResponseInfo struct {
+	// StatusCode HTTP status code
+	StatusCode int
+
+	// StatusText HTTP status text
+	StatusText string
+
+	// Latency time taken for the request
+	Latency time.Duration
+
+	// TokensInput consumed
+	TokensInput int
+
+	// TokensOutput generated
+	TokensOutput int
+
+	// TokensTotal consumed
+	TokensTotal int
+
+	// ContentPreview shows first N characters of response content
+	ContentPreview string
+
+	// ItemsProcessed (pages, clips, etc.)
+	ItemsProcessed int
+
+	// ErrorMessage if any
+	ErrorMessage string
+}
+
+// ProgressCallback is a function called with progress updates during processing
+type ProgressCallback func(update ProgressUpdate)
+
+// TranscribeRequestWithProgress extends TranscribeRequest with progress callback
+type TranscribeRequestWithProgress struct {
+	*TranscribeRequest
+	OnProgress ProgressCallback
 }

@@ -65,9 +65,11 @@ func TestNewClientFromEnv(t *testing.T) {
 		t.Error("NewClientFromEnv() returned nil client")
 	}
 
-	// Test with no keys
+	// Test with no keys (also unset LLM_ENDPOINT for local LLM)
 	os.Unsetenv("GEMINI_API_KEY")
 	os.Unsetenv("GOOGLE_API_KEY")
+	os.Unsetenv("LLM_ENDPOINT")
+	os.Unsetenv("IMAGE_LLM_ENDPOINT")
 	_, err = NewClientFromEnv()
 	if err == nil {
 		t.Error("NewClientFromEnv() should fail with no API keys set")
@@ -387,15 +389,15 @@ func TestWriteDocuments(t *testing.T) {
 
 	docs := []*MarkdownDocument{
 		{
-			Filename: "chapter_1.md",
-			Title:    "Chapter 1",
-			Content:  "# Chapter 1\n\nThis is chapter 1.",
+			Filename:  "chapter_1.md",
+			Title:     "Chapter 1",
+			Content:   "# Chapter 1\n\nThis is chapter 1.",
 			PageRange: PageRange{Start: 1, End: 5},
 		},
 		{
-			Filename: "chapter_2.md",
-			Title:    "Chapter 2",
-			Content:  "# Chapter 2\n\nThis is chapter 2.",
+			Filename:  "chapter_2.md",
+			Title:     "Chapter 2",
+			Content:   "# Chapter 2\n\nThis is chapter 2.",
 			PageRange: PageRange{Start: 6, End: 10},
 		},
 	}
@@ -512,9 +514,11 @@ func TestCheckConfig(t *testing.T) {
 		t.Errorf("CheckConfig() failed with key set: %v", err)
 	}
 
-	// Test with no keys
+	// Test with no keys (also unset LLM_ENDPOINT for local LLM)
 	os.Unsetenv("GEMINI_API_KEY")
 	os.Unsetenv("GOOGLE_API_KEY")
+	os.Unsetenv("LLM_ENDPOINT")
+	os.Unsetenv("IMAGE_LLM_ENDPOINT")
 	if err := CheckConfig(); err == nil {
 		t.Error("CheckConfig() should fail with no keys set")
 	}
@@ -538,29 +542,29 @@ func TestCreateSmartBatches(t *testing.T) {
 	client, _ := NewClient("test-key")
 
 	tests := []struct {
-		name       string
-		imageSizes []int64 // sizes in bytes
+		name        string
+		imageSizes  []int64 // sizes in bytes
 		wantBatches int
 	}{
 		{
-			name:       "small images fit in one batch",
-			imageSizes: []int64{100000, 200000, 300000}, // ~600KB total
+			name:        "small images fit in one batch",
+			imageSizes:  []int64{100000, 200000, 300000}, // ~600KB total
 			wantBatches: 1,
 		},
 		{
-			name:       "images split by size limit",
-			imageSizes: []int64{5000000, 5000000, 5000000, 5000000}, // 4x5MB = 20MB
-			wantBatches: 2, // Should split due to payload size limit
+			name:        "images split by size limit",
+			imageSizes:  []int64{5000000, 5000000, 5000000, 5000000}, // 4x5MB = 20MB
+			wantBatches: 2,                                           // Should split due to payload size limit
 		},
 		{
-			name:       "many small images split by count",
-			imageSizes: make([]int64, 25), // 25 small images
-			wantBatches: 2, // Should split at MaxImagesPerRequest (20)
+			name:        "many small images split by count",
+			imageSizes:  make([]int64, 25), // 25 small images
+			wantBatches: 2,                 // Should split at MaxImagesPerRequest (20)
 		},
 		{
-			name:       "single large image gets own batch",
-			imageSizes: []int64{100000, 12000000, 100000}, // 100KB, 12MB, 100KB
-			wantBatches: 3, // Large image needs its own batch
+			name:        "single large image gets own batch",
+			imageSizes:  []int64{100000, 12000000, 100000}, // 100KB, 12MB, 100KB
+			wantBatches: 3,                                 // Large image needs its own batch
 		},
 	}
 

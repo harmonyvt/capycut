@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"capycut/ai"
+	"capycut/tui"
 	"capycut/video"
 
 	"github.com/charmbracelet/huh"
@@ -1009,22 +1010,39 @@ func runNonInteractive(videoPath, clipDescription, customOutput string) {
 	))
 	fmt.Println(infoBox)
 
-	// Parse with AI
-	fmt.Println(infoStyle.Render("🦫 Parsing clip request..."))
+	// Parse with AI - show detailed status
 	parser, err := ai.NewParser()
 	if err != nil {
 		fmt.Println(errorStyle.Render("Error: " + err.Error()))
 		os.Exit(1)
 	}
 
+	// Show AI status
+	aiStatusBox := boxStyle.Render(fmt.Sprintf(
+		"🤖 AI Agent: %s\n"+
+			"   Model: %s\n"+
+			"   Status: Processing request...",
+		parser.GetProviderDisplayName(),
+		parser.GetModel(),
+	))
+	fmt.Println(aiStatusBox)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	clipReq, err := parser.ParseClipRequest(ctx, clipDescription, videoInfo.Duration)
+	// Progress callback
+	onProgress := func(update ai.ParserProgressUpdate) {
+		fmt.Printf("\r   Status: %s - %s", update.Status.String(), update.Message)
+	}
+
+	clipReq, err := parser.ParseClipRequestWithProgress(ctx, clipDescription, videoInfo.Duration, onProgress)
+	fmt.Println() // New line after progress
 	if err != nil {
 		fmt.Println(errorStyle.Render("Error: " + err.Error()))
 		os.Exit(1)
 	}
+
+	fmt.Println(successStyle.Render("✓ AI parsing complete"))
 
 	// Calculate clip duration
 	clipDuration, err := video.CalculateClipDuration(clipReq.StartTime, clipReq.EndTime)
@@ -1088,6 +1106,54 @@ func runNonInteractive(videoPath, clipDescription, customOutput string) {
 }
 
 func runClipWorkflow() bool {
+	// Use the new TUI by default, unless user explicitly wants the legacy UI
+	if os.Getenv("CAPYCUT_LEGACY_UI") != "1" {
+		return runClipWorkflowNew()
+	}
+	return runClipWorkflowLegacy()
+}
+
+// runClipWorkflowNew runs the new Bubble Tea based clip UI with AI transparency
+func runClipWorkflowNew() bool {
+	// Step 1: Select video file using huh file picker
+	var videoPath string
+	startDir, _ := os.Getwd()
+
+	filePicker := huh.NewFilePicker().
+		Title("Select a video file").
+		Description("Navigate and select a video to clip").
+		Picking(true).
+		CurrentDirectory(startDir).
+		ShowHidden(false).
+		ShowPermissions(false).
+		ShowSize(true).
+		Height(15).
+		AllowedTypes([]string{".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v"}).
+		Value(&videoPath)
+
+	err := huh.NewForm(huh.NewGroup(filePicker)).
+		WithTheme(huh.ThemeCatppuccin()).
+		Run()
+
+	if err != nil {
+		if err == huh.ErrUserAborted {
+			return false
+		}
+		fmt.Println(errorStyle.Render("Error: " + err.Error()))
+		return false
+	}
+
+	// Step 2: Run the new TUI with AI transparency
+	continueApp, err := tui.RunClipUI(videoPath)
+	if err != nil {
+		fmt.Println(errorStyle.Render("Error: " + err.Error()))
+		return askToContinue()
+	}
+	return continueApp
+}
+
+// runClipWorkflowLegacy runs the legacy huh-based clip workflow
+func runClipWorkflowLegacy() bool {
 	// Step 1: Select video file
 	var videoPath string
 	startDir, _ := os.Getwd()
@@ -1138,7 +1204,48 @@ func runClipWorkflow() bool {
 	))
 	fmt.Println(infoBox)
 
-	// Step 2: Get clip description
+	// Step 2: Select AI provider (if multiple are available)
+	availableProviders := ai.GetAvailableProviders()
+	var selectedProvider ai.Provider
+
+	if len(availableProviders) == 0 {
+		fmt.Println(errorStyle.Render("Error: No AI providers configured"))
+		fmt.Println(infoStyle.Render(ai.GetAPIKeyHelp()))
+		return askToContinue()
+	} else if len(availableProviders) == 1 {
+		// Only one provider available, use it automatically
+		selectedProvider = availableProviders[0]
+		fmt.Println(infoStyle.Render(fmt.Sprintf("Using AI provider: %s", ai.GetProviderDisplayNameStatic(selectedProvider))))
+	} else {
+		// Multiple providers available, let user choose
+		var providerOptions []huh.Option[string]
+		for _, p := range availableProviders {
+			providerOptions = append(providerOptions, huh.NewOption(ai.GetProviderDisplayNameStatic(p), string(p)))
+		}
+
+		var providerChoice string
+		providerSelect := huh.NewSelect[string]().
+			Title("Select AI provider").
+			Description("Multiple AI providers are configured. Choose one:").
+			Options(providerOptions...).
+			Value(&providerChoice)
+
+		err = huh.NewForm(huh.NewGroup(providerSelect)).
+			WithTheme(huh.ThemeCatppuccin()).
+			Run()
+
+		if err != nil {
+			if err == huh.ErrUserAborted {
+				return askToContinue()
+			}
+			fmt.Println(errorStyle.Render("Error: " + err.Error()))
+			return askToContinue()
+		}
+
+		selectedProvider = ai.Provider(providerChoice)
+	}
+
+	// Step 3: Get clip description
 	var clipDescription string
 	descInput := huh.NewText().
 		Title("🤖 What would you like to clip?").
@@ -1159,21 +1266,48 @@ func runClipWorkflow() bool {
 		return askToContinue()
 	}
 
-	// Step 3: Parse with AI
+	// Step 4: Parse with AI - show detailed progress
 	var clipReq *ai.ClipRequest
 	var parseErr error
+	var aiProvider string
+	var aiModel string
+
+	// Create the parser with the selected provider
+	parser, err := ai.NewParserWithProvider(selectedProvider)
+	if err != nil {
+		fmt.Println(errorStyle.Render("Error: " + err.Error()))
+		return askToContinue()
+	}
+
+	aiProvider = parser.GetProviderDisplayName()
+	aiModel = parser.GetModel()
+
+	// Show AI status box
+	aiStatusBox := boxStyle.Render(fmt.Sprintf(
+		"🤖 AI Agent: %s\n"+
+			"   Model: %s\n"+
+			"   Status: Initializing...",
+		aiProvider,
+		aiModel,
+	))
+	fmt.Println(aiStatusBox)
 
 	err = spinner.New().
 		Title("🦫 Chomp chomp... understanding your request...").
 		Action(func() {
-			parser, err := ai.NewParser()
-			if err != nil {
-				parseErr = err
-				return
-			}
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			clipReq, parseErr = parser.ParseClipRequest(ctx, clipDescription, videoInfo.Duration)
+
+			// Progress callback to update status
+			onProgress := func(update ai.ParserProgressUpdate) {
+				// In a real TUI we'd update the display, but spinner doesn't support dynamic updates
+				// The status is shown in debug mode or can be logged
+				if os.Getenv("CAPYCUT_DEBUG") != "" {
+					fmt.Printf("\n[AI Status] %s: %s - %s\n", update.Provider, update.Status.String(), update.Message)
+				}
+			}
+
+			clipReq, parseErr = parser.ParseClipRequestWithProgress(ctx, clipDescription, videoInfo.Duration, onProgress)
 		}).
 		Run()
 
@@ -1185,6 +1319,9 @@ func runClipWorkflow() bool {
 		}
 		return askToContinue()
 	}
+
+	// Show AI completion
+	fmt.Println(successStyle.Render("✓ AI parsing complete"))
 
 	// Calculate clip duration
 	clipDuration, err := video.CalculateClipDuration(clipReq.StartTime, clipReq.EndTime)
