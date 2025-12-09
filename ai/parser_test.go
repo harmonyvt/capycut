@@ -123,6 +123,10 @@ func TestCheckConfig(t *testing.T) {
 		os.Setenv("AZURE_OPENAI_MODEL", origModel)
 	}()
 
+	// Ensure local LLM is not configured so we test Azure path
+	os.Unsetenv("LLM_ENDPOINT")
+	os.Unsetenv("LLM_MODEL")
+
 	// Test missing endpoint
 	os.Setenv("AZURE_OPENAI_ENDPOINT", "")
 	os.Setenv("AZURE_OPENAI_API_KEY", "test-key")
@@ -204,15 +208,31 @@ func TestNewParser(t *testing.T) {
 	origEndpoint := os.Getenv("AZURE_OPENAI_ENDPOINT")
 	origKey := os.Getenv("AZURE_OPENAI_API_KEY")
 	origModel := os.Getenv("AZURE_OPENAI_MODEL")
+	origLLMEndpoint := os.Getenv("LLM_ENDPOINT")
+	origLLMModel := os.Getenv("LLM_MODEL")
 
 	// Clean up after test
 	defer func() {
 		os.Setenv("AZURE_OPENAI_ENDPOINT", origEndpoint)
 		os.Setenv("AZURE_OPENAI_API_KEY", origKey)
 		os.Setenv("AZURE_OPENAI_MODEL", origModel)
+		if origLLMEndpoint != "" {
+			os.Setenv("LLM_ENDPOINT", origLLMEndpoint)
+		} else {
+			os.Unsetenv("LLM_ENDPOINT")
+		}
+		if origLLMModel != "" {
+			os.Setenv("LLM_MODEL", origLLMModel)
+		} else {
+			os.Unsetenv("LLM_MODEL")
+		}
 	}()
 
-	// Test successful parser creation
+	// Ensure local LLM is not configured so we test Azure path
+	os.Unsetenv("LLM_ENDPOINT")
+	os.Unsetenv("LLM_MODEL")
+
+	// Test successful parser creation with Azure
 	os.Setenv("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com/")
 	os.Setenv("AZURE_OPENAI_API_KEY", "test-key")
 	os.Setenv("AZURE_OPENAI_MODEL", "gpt-5-codex")

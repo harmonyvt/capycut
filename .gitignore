@@ -32,3 +32,15 @@ Thumbs.db
 dist/
 *.mp4
 !assets/*.mp4
+
+# Output directories
+output/
+output-*/
+
+# Test assets
+assets/*.jpeg
+assets/*.jpg
+assets/*.png
+
+# Transcript files
+*_transcript.txt
